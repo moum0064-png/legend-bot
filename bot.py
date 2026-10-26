@@ -3,8 +3,28 @@ import requests
 import pandas as pd
 import numpy as np
 from datetime import datetime
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import os
 
-# بياناتك الخاصة
+# خادم ويب وهمي لرضا موقع Render المجاني عن الـ Port
+class SimpleHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is alive and running 24/7!")
+
+def run_web_server():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(('0.0.0.0', port), SimpleHandler)
+    server.serve_forever()
+
+# بدء خادم الويب في خلفية النظام
+t = threading.Thread(target=run_web_server)
+t.daemon = True
+t.start()
+
+# بياناتك الخاصة بالتيليجرام
 TELEGRAM_BOT_TOKEN = "7023463264:AAEL8N3HR5GxRhf0T9M_IW0VfY7_r797Ifs"
 TELEGRAM_CHANNEL_ID = "-1002330262707"
 
