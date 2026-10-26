@@ -32,7 +32,7 @@ SYMBOLS = ["EURUSD", "EURGBP", "EURJPY"]
 
 RSI_PERIOD = 7
 ADX_PERIOD = 14
-ADX_MIN_LEVEL = 14  # إبقاء قيمة الـ ADX الصارمة كما طلبت
+ADX_MIN_LEVEL = 2  # إبقاء قيمة الـ ADX الصارمة كما طلبت
 EMA_PERIOD = 20
 
 # متغيرات الإحصائيات (تتصفر كل ساعة)
