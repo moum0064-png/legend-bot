@@ -30,10 +30,10 @@ TELEGRAM_CHANNEL_ID = "-1002330262707"
 # قائمة الأزواج
 SYMBOLS = ["EURUSD", "EURGBP", "EURJPY"]
 
-RSI_PERIOD = 7
+RSI_PERIOD = 2
 ADX_PERIOD = 2
 ADX_MIN_LEVEL = 14  # إبقاء قيمة الـ ADX الصارمة كما طلبت
-EMA_PERIOD = 20
+EMA_PERIOD = 3
 
 # متغيرات الإحصائيات (تتصفر كل ساعة)
 stats_lock = threading.Lock()
