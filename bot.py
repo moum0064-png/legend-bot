@@ -43,7 +43,7 @@ current_hour_stats = {
     "total": 0
 }
 
-# قائمة مؤقتة للتحقق من نتائج الصفقات لكل زوج
+# قائمة مؤقتة للتحقق من نتائج الصفقات
 pending_signals = []
 
 def send_telegram_message(message):
@@ -143,7 +143,6 @@ def run_bot_logic():
         if df is None:
             continue
         
-        # فحص نتائج الصفقات السابقة لهذا الزوج
         check_pending_signals(symbol, df)
         
         df['rsi'] = calculate_rsi(df['close'], RSI_PERIOD)
@@ -160,33 +159,33 @@ def run_bot_logic():
         close_price = df['close'].iloc[i]
         ema_val = df['ema'].iloc[i]
         
-        # صفقة صعود (CALL)
+        # صفقة صعود (CALL) بالشكل الجديد المطلوبة
         if rsi_prev2 <= 30.0 and rsi_prev > 30.0 and adx_main >= ADX_MIN_LEVEL and close_price > ema_val:
             msg = (
-                f"🚨 **LEGEND PREMIUM SIGNALS** 🚨\n"
-                f"💱 **Pair:** {symbol} (M1)\n"
-                f"📈 **Action:** CALL (صعود)\n"
-                f"⏰ **Time:** {datetime.now().strftime('%H:%M')}\n"
-                f"💡 *الدخول مع بداية الشمعة الحالية لمدة دقيقة واحدة*"
+                f"🚨 LEGEND PREMIUM SIGNALS 🚨\n"
+                f"💱 Pair: {symbol} (M1)\n"
+                f"📈 Action: CALL 🟢 (صعود)\n"
+                f"⏰ Time: {datetime.now().strftime('%H:%M')}\n"
+                f"💡 الدخول مع بداية الشمعة الحالية لمدة دقيقة واحدة"
             )
             send_telegram_message(msg)
             with stats_lock:
                 pending_signals.append({'symbol': symbol, 'type': 'CALL', 'price': close_price})
-            print(f"تم إرسال إشارة صعود لـ {symbol} بنجاح!")
+            print(f"تم إرسال إشارة صعود لـ {symbol}")
             
-        # صفقة هبوط (PUT)
+        # صفقة هبوط (SELL/PUT) بالشكل الجديد المطلوبة
         elif rsi_prev2 >= 70.0 and rsi_prev < 70.0 and adx_main >= ADX_MIN_LEVEL and close_price < ema_val:
             msg = (
-                f"🚨 **LEGEND PREMIUM SIGNALS** 🚨\n"
-                f"💱 **Pair:** {symbol} (M1)\n"
-                f"📉 **Action:** PUT (هبوط)\n"
-                f"⏰ **Time:** {datetime.now().strftime('%H:%M')}\n"
-                f"💡 *الدخول مع بداية الشمعة الحالية لمدة دقيقة واحدة*"
+                f"🚨 LEGEND PREMIUM SIGNALS 🚨\n"
+                f"💱 Pair: {symbol} (M1)\n"
+                f"📈 Action: SELL 🔴 (هبوط)\n"
+                f"⏰ Time: {datetime.now().strftime('%H:%M')}\n"
+                f"💡 الدخول مع بداية الشمعة الحالية لمدة دقيقة واحدة"
             )
             send_telegram_message(msg)
             with stats_lock:
                 pending_signals.append({'symbol': symbol, 'type': 'PUT', 'price': close_price})
-            print(f"تم إرسال إشارة هبوط لـ {symbol} بنجاح!")
+            print(f"تم إرسال إشارة هبوط لـ {symbol}")
 
 def send_periodic_results():
     global current_hour_stats
@@ -220,8 +219,8 @@ def reset_stats():
     print("تم تصفير الإحصائيات بنجاح.")
 
 if __name__ == "__main__":
-    print("🚀 بدأ تشغيل بوت الإشارات المتعدد (EURUSD, EURGBP, EURJPY) 24/7...")
-    send_telegram_message("🟢 **تم تفعيل بوت الإشارات المتعدد (3 أزواج) مع نظام الإحصائيات بنجاح!**")
+    print("🚀 البوت يعمل بالشكل الجديد للإشارات 24/7...")
+    send_telegram_message("🟢 **تم تحديث شكل الإشارات بنجاح والبوت جاهز!**")
     
     last_result_time = time.time()
     last_reset_time = time.time()
@@ -231,12 +230,10 @@ if __name__ == "__main__":
         
         current_time = time.time()
         
-        # إرسال النتائج كل 10 دقائق (600 ثانية)
         if current_time - last_result_time >= 600:
             send_periodic_results()
             last_result_time = current_time
             
-        # إعادة تصفير الحساب كل ساعة (3600 ثانية)
         if current_time - last_reset_time >= 3600:
             reset_stats()
             last_reset_time = current_time
