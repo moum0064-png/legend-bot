@@ -161,7 +161,7 @@ def run_bot_logic():
     # صفقة صعود (CALL)
     if rsi_prev2 <= 30.0 and rsi_prev > 30.0 and adx_main >= ADX_MIN_LEVEL and close_price > ema_val:
         msg = (
-            f"🚨 **Chinese Momentum Signal** 🚨\n"
+            f"🚨 **🇩🇿LEGEND PREMUIM SIGNALS🇩🇿** 🚨\n"
             f"💱 **Pair:** {SYMBOL} (M1)\n"
             f"📈 **Action:** CALL (صعود)\n"
             f"⏰ **Time:** {datetime.now().strftime('%H:%M')}\n"
@@ -175,7 +175,7 @@ def run_bot_logic():
     # صفقة هبوط (PUT)
     elif rsi_prev2 >= 70.0 and rsi_prev < 70.0 and adx_main >= ADX_MIN_LEVEL and close_price < ema_val:
         msg = (
-            f"🚨 **Chinese Momentum Signal** 🚨\n"
+            f"🚨 **🇩🇿LEGEND PREMUIM SIGNALS🇩🇿** 🚨\n"
             f"💱 **Pair:** {SYMBOL} (M1)\n"
             f"📉 **Action:** PUT (هبوط)\n"
             f"⏰ **Time:** {datetime.now().strftime('%H:%M')}\n"
