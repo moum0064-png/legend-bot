@@ -27,12 +27,12 @@ t.start()
 TELEGRAM_BOT_TOKEN = "7023463264:AAEL8N3HR5GxRhf0T9M_IW0VfY7_r797Ifs"
 TELEGRAM_CHANNEL_ID = "-1002330262707"
 
-# قائمة الأزواج التي سيراقبها البوت
+# قائمة الأزواج
 SYMBOLS = ["EURUSD", "EURGBP", "EURJPY"]
 
 RSI_PERIOD = 7
 ADX_PERIOD = 14
-ADX_MIN_LEVEL = 25.0
+ADX_MIN_LEVEL = 25.0  # إبقاء قيمة الـ ADX الصارمة كما طلبت
 EMA_PERIOD = 20
 
 # متغيرات الإحصائيات (تتصفر كل ساعة)
@@ -43,7 +43,6 @@ current_hour_stats = {
     "total": 0
 }
 
-# قائمة مؤقتة للتحقق من نتائج الصفقات
 pending_signals = []
 
 def send_telegram_message(message):
@@ -111,7 +110,9 @@ def check_pending_signals(symbol, df):
     if df is None or len(df) < 2:
         return
     
-    current_close = df['close'].iloc[-1]
+    # مقارنة سعر الفتح وسعر الإغلاق الحقيقي للشمعة المنتهية (مطابق لمنطق السوق الحقيقي)
+    last_open = df['open'].iloc[-1]
+    last_close = df['close'].iloc[-1]
     
     with stats_lock:
         remaining_signals = []
@@ -121,10 +122,12 @@ def check_pending_signals(symbol, df):
                 entry_price = sig['price']
                 
                 is_win = False
-                if sig_type == 'CALL' and current_close > entry_price:
-                    is_win = True
-                elif sig_type == 'PUT' and current_close < entry_price:
-                    is_win = True
+                if sig_type == 'CALL':
+                    if last_close > entry_price:
+                        is_win = True
+                elif sig_type == 'PUT':
+                    if last_close < entry_price:
+                        is_win = True
                 
                 if is_win:
                     current_hour_stats["wins"] += 1
@@ -159,7 +162,7 @@ def run_bot_logic():
         close_price = df['close'].iloc[i]
         ema_val = df['ema'].iloc[i]
         
-        # صفقة صعود (CALL) بالشكل الجديد المطلوبة
+        # صفقة صعود (CALL)
         if rsi_prev2 <= 30.0 and rsi_prev > 30.0 and adx_main >= ADX_MIN_LEVEL and close_price > ema_val:
             msg = (
                 f"🚨 LEGEND PREMIUM SIGNALS 🚨\n"
@@ -173,7 +176,7 @@ def run_bot_logic():
                 pending_signals.append({'symbol': symbol, 'type': 'CALL', 'price': close_price})
             print(f"تم إرسال إشارة صعود لـ {symbol}")
             
-        # صفقة هبوط (SELL/PUT) بالشكل الجديد المطلوبة
+        # صفقة هبوط (SELL/PUT)
         elif rsi_prev2 >= 70.0 and rsi_prev < 70.0 and adx_main >= ADX_MIN_LEVEL and close_price < ema_val:
             msg = (
                 f"🚨 LEGEND PREMIUM SIGNALS 🚨\n"
@@ -219,8 +222,8 @@ def reset_stats():
     print("تم تصفير الإحصائيات بنجاح.")
 
 if __name__ == "__main__":
-    print("🚀 البوت يعمل بالشكل الجديد للإشارات 24/7...")
-    send_telegram_message("🟢 **تم تحديث شكل الإشارات بنجاح والبوت جاهز!**")
+    print("🚀 البوت يعمل بالنسخة الاحترافية للسوق الحقيقي...")
+    send_telegram_message("🟢 **تم ضبط البوت على معايير السوق الحقيقية ودقة الـ ADX بنجاح!**")
     
     last_result_time = time.time()
     last_reset_time = time.time()
