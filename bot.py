@@ -27,7 +27,9 @@ t.start()
 TELEGRAM_BOT_TOKEN = "7023463264:AAEL8N3HR5GxRhf0T9M_IW0VfY7_r797Ifs"
 TELEGRAM_CHANNEL_ID = "-1002330262707"
 
-SYMBOL = "EURUSD"
+# قائمة الأزواج التي سيراقبها البوت
+SYMBOLS = ["EURUSD", "EURGBP", "EURJPY"]
+
 RSI_PERIOD = 7
 ADX_PERIOD = 14
 ADX_MIN_LEVEL = 25.0
@@ -41,7 +43,7 @@ current_hour_stats = {
     "total": 0
 }
 
-# قائمة مؤقتة للتحقق من نتائج الصفقات السابقة
+# قائمة مؤقتة للتحقق من نتائج الصفقات لكل زوج
 pending_signals = []
 
 def send_telegram_message(message):
@@ -83,9 +85,9 @@ def calculate_adx(high, low, close, period):
     adx = dx.rolling(window=period).mean()
     return adx
 
-def fetch_market_data():
+def fetch_market_data(symbol):
     try:
-        url = f"https://query1.finance.yahoo.com/v7/finance/chart/{SYMBOL}=X?interval=1m&range=1d"
+        url = f"https://query1.finance.yahoo.com/v7/finance/chart/{symbol}=X?interval=1m&range=1d"
         headers = {'User-Agent': 'Mozilla/5.0'}
         res = requests.get(url, headers=headers)
         data = res.json()
@@ -104,87 +106,87 @@ def fetch_market_data():
     except Exception as e:
         return None
 
-def check_pending_signals(df):
+def check_pending_signals(symbol, df):
     global pending_signals
     if df is None or len(df) < 2:
         return
     
     current_close = df['close'].iloc[-1]
-    current_open = df['open'].iloc[-1]
     
     with stats_lock:
         remaining_signals = []
         for sig in pending_signals:
-            sig_type = sig['type'] # CALL or PUT
-            entry_price = sig['price']
-            
-            # التحقق من نتيجة الشمعة التي تلت الإشارة
-            is_win = False
-            if sig_type == 'CALL':
-                if current_close > entry_price:
+            if sig['symbol'] == symbol:
+                sig_type = sig['type']
+                entry_price = sig['price']
+                
+                is_win = False
+                if sig_type == 'CALL' and current_close > entry_price:
                     is_win = True
-            elif sig_type == 'PUT':
-                if current_close < entry_price:
+                elif sig_type == 'PUT' and current_close < entry_price:
                     is_win = True
-            
-            if is_win:
-                current_hour_stats["wins"] += 1
+                
+                if is_win:
+                    current_hour_stats["wins"] += 1
+                else:
+                    current_hour_stats["losses"] += 1
+                current_hour_stats["total"] += 1
             else:
-                current_hour_stats["losses"] += 1
-            current_hour_stats["total"] += 1
-            
+                remaining_signals.append(sig)
+                
         pending_signals = remaining_signals
 
 def run_bot_logic():
     global pending_signals
-    df = fetch_market_data()
-    if df is None:
-        return
-    
-    # فحص نتائج الصفقات السابقة بناء على الشمعة الجديدة
-    check_pending_signals(df)
-    
-    df['rsi'] = calculate_rsi(df['close'], RSI_PERIOD)
-    df['adx'] = calculate_adx(df['high'], df['low'], df['close'], ADX_PERIOD)
-    df['ema'] = df['close'].ewm(span=EMA_PERIOD, adjust=False).mean()
-    
-    i = len(df) - 2
-    if i < 1:
-        return
+    for symbol in SYMBOLS:
+        df = fetch_market_data(symbol)
+        if df is None:
+            continue
         
-    rsi_prev = df['rsi'].iloc[i]
-    rsi_prev2 = df['rsi'].iloc[i-1]
-    adx_main = df['adx'].iloc[i]
-    close_price = df['close'].iloc[i]
-    ema_val = df['ema'].iloc[i]
-    
-    # صفقة صعود (CALL)
-    if rsi_prev2 <= 30.0 and rsi_prev > 30.0 and adx_main >= ADX_MIN_LEVEL and close_price > ema_val:
-        msg = (
-            f"🚨 **🇩🇿LEGEND PREMUIM SIGNALS🇩🇿** 🚨\n"
-            f"💱 **Pair:** {SYMBOL} (M1)\n"
-            f"📈 **Action:** CALL (صعود)\n"
-            f"⏰ **Time:** {datetime.now().strftime('%H:%M')}\n"
-            f"💡 *الدخول مع بداية الشمعة الحالية لمدة دقيقة واحدة*"
-        )
-        send_telegram_message(msg)
-        with stats_lock:
-            pending_signals.append({'type': 'CALL', 'price': close_price})
-        print("تم إرسال إشارة صعود وتسجيلها للمتابعة!")
+        # فحص نتائج الصفقات السابقة لهذا الزوج
+        check_pending_signals(symbol, df)
         
-    # صفقة هبوط (PUT)
-    elif rsi_prev2 >= 70.0 and rsi_prev < 70.0 and adx_main >= ADX_MIN_LEVEL and close_price < ema_val:
-        msg = (
-            f"🚨 **🇩🇿LEGEND PREMUIM SIGNALS🇩🇿** 🚨\n"
-            f"💱 **Pair:** {SYMBOL} (M1)\n"
-            f"📉 **Action:** PUT (هبوط)\n"
-            f"⏰ **Time:** {datetime.now().strftime('%H:%M')}\n"
-            f"💡 *الدخول مع بداية الشمعة الحالية لمدة دقيقة واحدة*"
-        )
-        send_telegram_message(msg)
-        with stats_lock:
-            pending_signals.append({'type': 'PUT', 'price': close_price})
-        print("تم إرسال إشارة هبوط وتسجيلها للمتابعة!")
+        df['rsi'] = calculate_rsi(df['close'], RSI_PERIOD)
+        df['adx'] = calculate_adx(df['high'], df['low'], df['close'], ADX_PERIOD)
+        df['ema'] = df['close'].ewm(span=EMA_PERIOD, adjust=False).mean()
+        
+        i = len(df) - 2
+        if i < 1:
+            continue
+            
+        rsi_prev = df['rsi'].iloc[i]
+        rsi_prev2 = df['rsi'].iloc[i-1]
+        adx_main = df['adx'].iloc[i]
+        close_price = df['close'].iloc[i]
+        ema_val = df['ema'].iloc[i]
+        
+        # صفقة صعود (CALL)
+        if rsi_prev2 <= 30.0 and rsi_prev > 30.0 and adx_main >= ADX_MIN_LEVEL and close_price > ema_val:
+            msg = (
+                f"🚨 **LEGEND PREMIUM SIGNALS** 🚨\n"
+                f"💱 **Pair:** {symbol} (M1)\n"
+                f"📈 **Action:** CALL (صعود)\n"
+                f"⏰ **Time:** {datetime.now().strftime('%H:%M')}\n"
+                f"💡 *الدخول مع بداية الشمعة الحالية لمدة دقيقة واحدة*"
+            )
+            send_telegram_message(msg)
+            with stats_lock:
+                pending_signals.append({'symbol': symbol, 'type': 'CALL', 'price': close_price})
+            print(f"تم إرسال إشارة صعود لـ {symbol} بنجاح!")
+            
+        # صفقة هبوط (PUT)
+        elif rsi_prev2 >= 70.0 and rsi_prev < 70.0 and adx_main >= ADX_MIN_LEVEL and close_price < ema_val:
+            msg = (
+                f"🚨 **LEGEND PREMIUM SIGNALS** 🚨\n"
+                f"💱 **Pair:** {symbol} (M1)\n"
+                f"📉 **Action:** PUT (هبوط)\n"
+                f"⏰ **Time:** {datetime.now().strftime('%H:%M')}\n"
+                f"💡 *الدخول مع بداية الشمعة الحالية لمدة دقيقة واحدة*"
+            )
+            send_telegram_message(msg)
+            with stats_lock:
+                pending_signals.append({'symbol': symbol, 'type': 'PUT', 'price': close_price})
+            print(f"تم إرسال إشارة هبوط لـ {symbol} بنجاح!")
 
 def send_periodic_results():
     global current_hour_stats
@@ -218,8 +220,8 @@ def reset_stats():
     print("تم تصفير الإحصائيات بنجاح.")
 
 if __name__ == "__main__":
-    print("🚀 بدأ تشغيل البوت المطور مع نظام النتائج والإحصائيات 24/7...")
-    send_telegram_message("🟢 **تم تفعيل بوت الإشارات مع نظام الإحصائيات والنتائج التلقائية بنجاح!**")
+    print("🚀 بدأ تشغيل بوت الإشارات المتعدد (EURUSD, EURGBP, EURJPY) 24/7...")
+    send_telegram_message("🟢 **تم تفعيل بوت الإشارات المتعدد (3 أزواج) مع نظام الإحصائيات بنجاح!**")
     
     last_result_time = time.time()
     last_reset_time = time.time()
