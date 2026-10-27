@@ -110,63 +110,74 @@ def check_pending_signals(symbol, df):
                 
         pending_signals = remaining_signals
 
-def run_bot_logic():
+def process_symbol(symbol):
     global pending_signals
-    for symbol in SYMBOLS:
-        df = fetch_market_data(symbol)
-        if df is None:
-            continue
+    df = fetch_market_data(symbol)
+    if df is None:
+        return
+    
+    # تتبع النتائج الفورية للصفقة السابقة لهذا الزوج
+    check_pending_signals(symbol, df)
+    
+    # حساب المتوسطات المتحركة للاتجاه (EMA 20 و EMA 50)
+    df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
+    df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
+    df['vol_sma'] = df['volume'].rolling(window=10).mean()
+    
+    i = len(df) - 2
+    if i < 2:
+        return
         
-        # تتبع النتائج الفورية للصفقة السابقة أولاً
-        check_pending_signals(symbol, df)
+    close_prev = df['close'].iloc[i]
+    open_prev = df['open'].iloc[i]
+    ema20 = df['ema20'].iloc[i]
+    ema50 = df['ema50'].iloc[i]
+    vol = df['volume'].iloc[i]
+    vol_avg = df['vol_sma'].iloc[i]
+    
+    # سعر افتتاح الشمعة الحالية (الشمعة القادمة لدخول الصفقة)
+    current_open = df['open'].iloc[-1]
+    
+    # شروط مرنة وسريعة لاصطياد الفرص دون تأخير مبالغ فيه
+    is_uptrend = close_prev > ema20
+    is_downtrend = close_prev < ema20
+    
+    signal_type = None
+    if is_uptrend and close_prev > open_prev:
+        signal_type = 'CALL'
+    elif is_downtrend and close_prev < open_prev:
+        signal_type = 'PUT'
         
-        # حساب المتوسطات المتحركة للاتجاه (EMA 20 و EMA 50)
-        df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
-        df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
-        df['vol_sma'] = df['volume'].rolling(window=10).mean()
+    if signal_type:
+        emoji = '🟢 (صعود - CALL)' if signal_type == 'CALL' else '🔴 (هبوط - PUT)'
+        msg = (
+            f"⚡ **LEGEND FAST DIRECT SIGNAL** ⚡\n"
+            f"━━━━━━━━━━━━━━━━━━━\n"
+            f"💱 الزوج: `{symbol}` (سوق حقيقي)\n"
+            f"📊 الإشارة: **{signal_type} {emoji}**\n"
+            f"⏰ الفريم: `1M` | الوقت: `{datetime.now().strftime('%H:%M:%S')}`\n"
+            f"💡 *الدخول مع افتتاح الشمعة القادمة لمدة دقيقة*"
+        )
         
-        i = len(df) - 2
-        if i < 2:
-            continue
+        send_telegram_message(msg)
+        with stats_lock:
+            pending_signals.append({'symbol': symbol, 'type': signal_type, 'price': current_open})
+        print(f"تم إرسال إشارة سريعة لـ {symbol} بسعر {current_open}")
+
+def run_bot_loop():
+    while True:
+        # فحص جميع الأزواج بشكل متوازي وسريع جداً
+        threads = []
+        for symbol in SYMBOLS:
+            t = threading.Thread(target=process_symbol, args=(symbol,))
+            t.start()
+            threads.append(t)
             
-        close_prev = df['close'].iloc[i]
-        open_prev = df['open'].iloc[i]
-        ema20 = df['ema20'].iloc[i]
-        ema50 = df['ema50'].iloc[i]
-        vol = df['volume'].iloc[i]
-        vol_avg = df['vol_sma'].iloc[i]
-        
-        # سعر افتتاح الشمعة الحالية (الشمعة القادمة لدخول الصفقة)
-        current_open = df['open'].iloc[-1]
-        
-        # الشروط الفنية (ترند + فوليوم) مباشرة دون عكس
-        is_uptrend = ema20 > ema50 and close_prev > ema20
-        is_downtrend = ema20 < ema50 and close_prev < ema20
-        high_volume = vol >= vol_avg * 1.05
-        
-        signal_type = None
-        if is_uptrend and high_volume and close_prev > open_prev:
-            signal_type = 'CALL'
-        elif is_downtrend and high_volume and close_prev < open_prev:
-            signal_type = 'PUT'
+        for t in threads:
+            t.join()
             
-        if signal_type:
-            emoji = '🟢 (صعود - CALL)' if signal_type == 'CALL' else '🔴 (هبوط - PUT)'
-            msg = (
-                f"⚡ **LEGEND V4.2 - تحليل فني مباشر** ⚡\n"
-                f"━━━━━━━━━━━━━━━━━━━\n"
-                f"💱 الزوج: `{symbol}` (سوق حقيقي)\n"
-                f"📊 الإشارة: **{signal_type} {emoji}**\n"
-                f"⏰ الفريم: `1M` | الوقت: `{datetime.now().strftime('%H:%M:%S')}`\n"
-                f"💡 *الدخول المباشر مع افتتاح الشمعة القادمة لمدة دقيقة*"
-            )
-            
-            send_telegram_message(msg)
-            with stats_lock:
-                pending_signals.append({'symbol': symbol, 'type': signal_type, 'price': current_open})
-            print(f"تم إرسال إشارة تحليل فني مباشر لـ {symbol} بسعر {current_open}")
-            
-        break
+        # الانتظار 30 ثانية فقط قبل الدورة التالية لتسريع التدفق
+        time.sleep(30)
 
 def send_periodic_results():
     global current_hour_stats
@@ -178,28 +189,27 @@ def send_periodic_results():
         win_rate = (wins / total) * 100 if total > 0 else 0.0
         
         report = (
-            f"📊 **تقرير أداء التحليل الفني المباشر (ITM / OTM)** 📊\n"
+            f"📊 **تقرير أداء الصفقات السريعة (ITM / OTM)** 📊\n"
             f"━━━━━━━━━━━━━━━━━━━\n"
             f"🎯 إجمالي الصفقات: `{total}`\n"
             f"✅ صفقات ناجحة (ITM): `{wins}`\n"
             f"❌ صفقات خاسرة (OTM): `{losses}`\n"
             f"📈 نسبة الفوز المحققة: `{win_rate:.1f}%`\n"
             f"━━━━━━━━━━━━━━━━━━━\n"
-            f"💎 *LEGEND - MARKET DIRECT V4.2*"
+            f"💎 *LEGEND - FAST MARKET BOT*"
         )
         send_telegram_message(report)
 
 if __name__ == "__main__":
-    print("🚀 بدء تشغيل بوت التحليل الفني المباشر للسوق الحقيقي...")
-    send_telegram_message("🟢 **تم تفعيل بوت التحليل الفني المباشر (بدون عكس الاتجاه) لجميع الأزواج الحقيقية!**")
+    print("🚀 بدء تشغيل بوت الفحص السريع والمتوازي لجميع الأزواج...")
+    send_telegram_message("🟢 **تم تفعيل وضع الفحص السريع والمتوازي لجميع الأزواج الحقيقية! سترى تدفق الصفقات الآن!**")
     
-    last_result_time = time.time()
+    # تشغيل حلقة البوت في خيط مستقل
+    bot_thread = threading.Thread(target=run_bot_loop)
+    bot_thread.daemon = True
+    bot_thread.start()
     
+    # إرسال التقارير الدورية كل 10 دقائق
     while True:
-        run_bot_logic()
-        
-        if time.time() - last_result_time >= 600:
-            send_periodic_results()
-            last_result_time = time.time()
-            
-        time.sleep(60)
+        time.sleep(600)
+        send_periodic_results()
