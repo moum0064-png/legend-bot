@@ -44,7 +44,7 @@ global_stats = {
     "total": 0
 }
 
-# إحصائيات مستقلة لكل زوج لتتبع أداء كل زوج على حدة
+# إحصائيات مستقلة لكل زوج
 symbol_stats = {sym: {"wins": 0, "losses": 0} for sym in SYMBOLS}
 
 last_signal_time = {sym: 0 for sym in SYMBOLS}
@@ -163,28 +163,61 @@ def process_symbol(symbol):
     
     check_pending_signals(symbol, df)
     
-    # مؤشرات الزخم والاتجاه السريعة
-    df['ema5'] = df['close'].ewm(span=5, adjust=False).mean()
-    df['ema10'] = df['close'].ewm(span=10, adjust=False).mean()
-    
+    # حساب خصائص الشموع لاستراتيجية سيكولوجية الشموع (Price Action & Candle Psychology)
     i = len(df) - 2
     if i < 3:
         return
         
-    close_p = df['close'].iloc[i]
-    open_p = df['open'].iloc[i]
-    ema5 = df['ema5'].iloc[i]
-    ema10 = df['ema10'].iloc[i]
+    # الشمعة السابقة (التي أغلقت للتو)
+    o1, h1, l1, c1 = df['open'].iloc[i], df['high'].iloc[i], df['low'].iloc[i], df['close'].iloc[i]
+    # الشمعة التي قبلها (لتحديد نموذج الابتلاع أو الانعكاس)
+    o2, h2, l2, c2 = df['open'].iloc[i-1], df['high'].iloc[i-1], df['low'].iloc[i-1], df['close'].iloc[i-1]
+    
+    body1 = abs(c1 - o1)
+    range1 = h1 - l1
+    body2 = abs(c2 - o2)
+    
+    # قياس الظلال والجسم لتحديد النماذج
+    is_bullish_1 = c1 > o1
+    is_bearish_1 = c1 < o1
+    is_bullish_2 = c2 > o2
+    is_bearish_2 = c2 < o2
     
     current_open = df['open'].iloc[-1]
     current_ts = int(df['timestamp'].iloc[-1])
     
     signal_type = None
-    if ema5 > ema10 and close_p > open_p:
+    pattern_name = ""
+    
+    # 1. نموذج الابتلاع الشرائي (Bullish Engulfing)
+    if is_bearish_2 and is_bullish_1 and c1 >= o2 and o1 <= c2 and body1 > body2 * 1.2:
         signal_type = 'CALL'
-    elif ema5 < ema10 and close_p < open_p:
-        signal_type = 'PUT'
+        pattern_name = "ابتلاع شرائي (Bullish Engulfing)"
         
+    # 2. نموذج الابتلاع البيعي (Bearish Engulfing)
+    elif is_bullish_2 and is_bearish_1 and c1 <= o2 and o1 >= c2 and body1 > body2 * 1.2:
+        signal_type = 'PUT'
+        pattern_name = "ابتلاع بيعي (Bearish Engulfing)"
+        
+    # 3. شمعة المطرقة / البين بار الشرائية (Hammer / Pin Bar Buy)
+    elif is_bullish_1 and (min(o1, c1) - l1) > (body1 * 2) and (h1 - max(o1, c1)) < (body1 * 0.5):
+        signal_type = 'CALL'
+        pattern_name = "مطرقة انعكاسية (Bullish Pin Bar)"
+        
+    # 4. شمعة الشهاب / البين بار البيعية (Shooting Star / Pin Bar Sell)
+    elif is_bearish_1 and (h1 - max(o1, c1)) > (body1 * 2) and (min(o1, c1) - l1) < (body1 * 0.5):
+        signal_type = 'PUT'
+        pattern_name = "شهاب انعكاسي (Bearish Pin Bar)"
+        
+    # 5. استمرارية الزخم القوي (Strong Momentum Candle)
+    elif body1 > range1 * 0.75 and range1 > (df['close'].rolling(5).std().iloc[i] * 2):
+        if is_bullish_1:
+            signal_type = 'CALL'
+            pattern_name = "شمعة زخم صاعد (Momentum Push)"
+        elif is_bearish_1:
+            signal_type = 'PUT'
+            pattern_name = "شمعة زخم هابط (Momentum Drop)"
+
     if signal_type:
         last_signal_time[symbol] = current_time
         emoji = 'صعود - CALL' if signal_type == 'CALL' else 'هبوط - PUT'
@@ -195,7 +228,6 @@ def process_symbol(symbol):
         end_1m = (now_dt + timedelta(minutes=1)).strftime('%H:%M:%S')
         end_5m = (now_dt + timedelta(minutes=5)).strftime('%H:%M:%S')
         
-        # جلب إحصائيات هذا الزوج المحدد لعرضها أسفل الرسالة
         with stats_lock:
             s_wins = symbol_stats[symbol]["wins"]
             s_losses = symbol_stats[symbol]["losses"]
@@ -203,9 +235,10 @@ def process_symbol(symbol):
             s_win_rate = (s_wins / s_total * 100) if s_total > 0 else 0.0
         
         msg = (
-            f"⚡ **LEGEND-X INSTANT SESSION PRO** ⚡\n"
+            f"🕯️ **LEGEND-X CANDLE PSYCHOLOGY PRO** 🕯️\n"
             f"━━━━━━━━━━━━━━━━━━━\n"
             f"💱 الزوج: `{symbol}` (سوق حقيقي)\n"
+            f"🧠 النمط المكتشف: `{pattern_name}`\n"
             f"📊 الإشارة: `{signal_type}` {emoji_icon} `({emoji})`\n"
             f"⏰ الفريم: `1M` | وقت الدخول: `{time_str}`\n"
             f"⏳ نهاية صفقة الدقيقة: `{end_1m}`\n"
@@ -226,7 +259,7 @@ def process_symbol(symbol):
             })
 
 def run_bot_loop():
-    print("🚀 Instant session loop started...")
+    print("🚀 Candle psychology session loop started...")
     while True:
         try:
             for symbol in SYMBOLS:
@@ -259,15 +292,15 @@ def send_periodic_results():
                     f"❌ صفقات خاسرة: `{losses}`\n"
                     f"📈 نسبة الفوز الإجمالية: `{win_rate:.1f}%`\n"
                     f"━━━━━━━━━━━━━━━━━━━\n"
-                    f"💎 *LEGEND-X INSTANT SESSIONS*"
+                    f"💎 *LEGEND-X CANDLE PSYCHOLOGY*"
                 )
                 send_telegram_message(report)
         except Exception as e:
             print(f"Error in periodic results: {e}")
 
 if __name__ == "__main__":
-    print("🚀 تشغيل البوت مع إحصائيات كل زوج تحت كل إشارة...")
-    send_telegram_message("🟢 **تم إصلاح خطأ الكود وتشغيل البوت بنجاح!**")
+    print("🚀 تشغيل البوت بنظام سيكولوجية الشموع وقراءة الشارت...")
+    send_telegram_message("🟢 **تم تفعيل استراتيجية سيكولوجية الشموع اليابانية (Engulfing, Pin Bar, Momentum) بنجاح!**")
     
     bot_thread = threading.Thread(target=run_bot_loop)
     bot_thread.daemon = True
