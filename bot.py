@@ -78,10 +78,8 @@ def fetch_market_data(symbol):
 
 def check_pending_signals(symbol, df):
     global pending_signals, current_hour_stats
-    if df is None or len(df) < 6: # نحتاج بيانات كافية لفحص دقيقة و 5 دقائق
+    if df is None or len(df) < 7:
         return
-    
-    current_close = df['close'].iloc[-1]
     
     with stats_lock:
         remaining_signals = []
@@ -91,44 +89,52 @@ def check_pending_signals(symbol, df):
                 entry_price = sig['price']
                 entry_index = sig['index']
                 
-                # 1. فحص نتيجة الدقيقة الواحدة (الشموع الحالية مقارنة بسعر الدخول)
-                is_win_1m = False
-                if sig_type == 'CALL' and current_close > entry_price:
-                    is_win_1m = True
-                elif sig_type == 'PUT' and current_close < entry_price:
-                    is_win_1m = True
-                
-                # 2. فحص محاكاة نتيجة الـ 5 دقائق (السعر بعد 5 شمعات من الدخول)
                 current_idx = len(df) - 1
-                target_idx = entry_index + 5
                 
-                is_win_5m = None
-                close_5m = None
-                if current_idx >= target_idx:
-                    close_5m = df['close'].iloc[target_idx]
-                    if sig_type == 'CALL' and close_5m > entry_price:
-                        is_win_5m = True
+                # 1. التحقق من صفقة الدقيقة الواحدة (يتم فحصها بعد اكتمال شمعة الصفقة بدقة)
+                target_1m_idx = entry_index + 1
+                if current_idx >= target_1m_idx:
+                    close_1m = df['close'].iloc[target_1m_idx]
+                    
+                    is_win_1m = False
+                    if sig_type == 'CALL' and close_1m > entry_price:
+                        is_win_1m = True
+                    elif sig_type == 'PUT' and close_1m < entry_price:
+                        is_win_1m = True
+                    
+                    # 2. محاكاة صفقة الـ 5 دقائق
+                    target_5m_idx = entry_index + 5
+                    is_win_5m = None
+                    close_5m = None
+                    if current_idx >= target_5m_idx:
+                        close_5m = df['close'].iloc[target_5m_idx]
+                        if sig_type == 'CALL' and close_5m > entry_price:
+                            is_win_5m = True
+                        elif sig_type == 'PUT' and close_5m < entry_price:
+                            is_win_5m = True
+                        else:
+                            is_win_5m = False
+
+                    # إرسال النتيجة الفورية لدقيقة واحدة
+                    if is_win_1m:
+                        current_hour_stats["wins"] += 1
+                        res_1m = f"✅ **نتيجة صفقة الدقيقة (1M): ITM (ربح ناجح)** 🎯\n💱 الزوج: `{symbol}`\n📈 الاتجاه: `{sig_type}`\n💰 الدخول: `{entry_price}` | الإغلاق: `{close_1m}`"
                     else:
-                        is_win_5m = False
-                
-                # إرسال نتيجة الدقيقة الواحدة فوراً
-                if is_win_1m:
-                    current_hour_stats["wins"] += 1
-                    res_1m = f"✅ **نتيجة صفقة الدقيقة (1M): ITM (ربح ناجح)** 🎯\n💱 الزوج: `{symbol}`\n📈 الاتجاه: `{sig_type}`\n💰 الدخول: `{entry_price}` | الإغلاق (1M): `{current_close}`"
+                        current_hour_stats["losses"] += 1
+                        res_1m = f"❌ **نتيجة صفقة الدقيقة (1M): OTM (خسارة)** ⚠️\n💱 الزوج: `{symbol}`\n📈 الاتجاه: `{sig_type}`\n💰 الدخول: `{entry_price}` | الإغلاق: `{close_1m}`"
+                    
+                    current_hour_stats["total"] += 1
+                    
+                    if is_win_5m is not None:
+                        res_5m_str = "✅ (ربح 5M)" if is_win_5m else "❌ (خسارة 5M)"
+                        res_msg = f"{res_1m}\n🔮 **محاكاة صفقة الـ 5 دقائق:** `{res_5m_str}` (الإغلاق: `{close_5m}`)"
+                    else:
+                        res_msg = f"{res_1m}\n🔮 *محاكاة الـ 5 دقائق: قيد الانتظار...*"
+                    
+                    send_telegram_message(res_msg)
                 else:
-                    current_hour_stats["losses"] += 1
-                    res_1m = f"❌ **نتيجة صفقة الدقيقة (1M): OTM (خسارة)** ⚠️\n💱 الزوج: `{symbol}`\n📈 الاتجاه: `{sig_type}`\n💰 الدخول: `{entry_price}` | الإغلاق (1M): `{current_close}`"
-                
-                current_hour_stats["total"] += 1
-                
-                # إضافة محاكاة الـ 5 دقائق للرسالة إذا اكتملت بوضوح
-                if is_win_5m is not None:
-                    res_5m_str = "✅ (ربح 5M)" if is_win_5m else "❌ (خسارة 5M)"
-                    res_msg = f"{res_1m}\n🔮 **محاكاة صفقة الـ 5 دقائق:** `{res_5m_str}` (الإغلاق: `{close_5m}`)"
-                else:
-                    res_msg = f"{res_1m}\n🔮 *محاكاة الـ 5 دقائق: قيد الانتظار حتى اكتمال الشمعة الخامسة...*"
-                
-                send_telegram_message(res_msg)
+                    # لم تنتهِ الشمعة بعد، نبقي الصفقة معلقة
+                    remaining_signals.append(sig)
             else:
                 remaining_signals.append(sig)
                 
@@ -147,7 +153,7 @@ def process_symbol(symbol):
     
     check_pending_signals(symbol, df)
     
-    # مؤشرات التحليل الاحترافي (EMA + Bollinger + Volume)
+    # مؤشرات التحليل الاحترافي
     df['ema9'] = df['close'].ewm(span=9, adjust=False).mean()
     df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
     df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
@@ -171,6 +177,8 @@ def process_symbol(symbol):
     bb_lower = df['bb_lower'].iloc[i]
     vol = df['volume'].iloc[i]
     vol_avg = df['vol_sma'].iloc[i]
+    
+    # سعر افتتاح الشمعة القادمة (سعر الدقيق الدقيق للصفقة)
     current_open = df['open'].iloc[-1]
     
     is_strong_uptrend = (ema9 > ema20) and (ema20 > ema50) and (close_prev > bb_upper * 0.99) and (vol >= vol_avg)
@@ -184,22 +192,24 @@ def process_symbol(symbol):
         
     if signal_type:
         last_signal_time[symbol] = current_time
-        emoji = '🟢 (صعود - CALL)' if signal_type == 'CALL' else '🔴 (هبوط - PUT)'
+        emoji = 'صعود - CALL' if signal_type == 'CALL' else 'هبوط - PUT'
+        emoji_icon = '🟢' if signal_type == 'CALL' else '🔴'
         
         now_dt = datetime.now()
         time_str = now_dt.strftime('%H:%M:%S')
         end_1m = (now_dt + timedelta(minutes=1)).strftime('%H:%M:%S')
         end_5m = (now_dt + timedelta(minutes=5)).strftime('%H:%M:%S')
         
+        # قالب الرسالة المطلوب بدقة
         msg = (
-            f"⚡ **QUANT-X PRO SIGNAL + ANALYZER** ⚡\n"
+            f"⚡ **LEGEND-X PRO ANALYZER** ⚡\n"
             f"━━━━━━━━━━━━━━━━━━━\n"
             f"💱 الزوج: `{symbol}` (سوق حقيقي)\n"
-            f"📊 الإشارة: **{signal_type} {emoji}**\n"
+            f"📊 الإشارة: `{signal_type}` {emoji_icon} `({emoji})`\n"
             f"⏰ وقت الإرسال: `{time_str}`\n"
             f"⏳ نهاية صفقة الدقيقة: `{end_1m}`\n"
             f"⏳ نهاية صفقة الـ 5 دقائق: `{end_5m}`\n"
-            f"💡 *تحليل احترافي (EMA + Bollinger) - فحص فوري ونتائج مزدوجة*"
+            f"💡 حاول اخذ الصفقة مارجنال + ادارة رأس المال"
         )
         
         send_telegram_message(msg)
@@ -208,9 +218,9 @@ def process_symbol(symbol):
                 'symbol': symbol,
                 'type': signal_type,
                 'price': current_open,
-                'index': len(df) - 1 # لحساب الـ 5 دقائق بدقة
+                'index': len(df) - 1
             })
-        print(f"تم إرسال إشارة مع تتبع النتائج لـ {symbol}")
+        print(f"تم إرسال إشارة دقيقة لـ {symbol}")
 
 def run_bot_loop():
     while True:
@@ -242,18 +252,18 @@ def send_periodic_results():
             f"❌ صفقات خاسرة (OTM): `{losses}`\n"
             f"📈 نسبة الفوز المحققة: `{win_rate:.1f}%`\n"
             f"━━━━━━━━━━━━━━━━━━━\n"
-            f"💎 *QUANT-X SESSION REPORT BOT*"
+            f"💎 *LEGEND-X PRO BOT*"
         )
         send_telegram_message(report)
 
 if __name__ == "__main__":
-    print("🚀 بدء تشغيل البوت مع نظام تتبع نتائج الدقيقة والـ 5 دقائق...")
-    send_telegram_message("🟢 **تم تفعيل نظام النتائج الفورية (دقيقة واحدة) ومحاكاة صفقات الـ 5 دقائق بجانب ملخص الجلسة!**")
+    print("🚀 بدء تشغيل البوت بالنسخة المطورة والمضبوطة...")
+    send_telegram_message("🟢 **تم تفعيل نظام LEGEND-X PRO مع دقة تتبع النتائج ومحاكاة الـ 5 دقائق!**")
     
     bot_thread = threading.Thread(target=run_bot_loop)
     bot_thread.daemon = True
     bot_thread.start()
     
     while True:
-        time.sleep(300) # ملخص كل 5 دقائق
+        time.sleep(300)
         send_periodic_results()
