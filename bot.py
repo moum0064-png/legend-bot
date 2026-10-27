@@ -123,7 +123,7 @@ def check_pending_signals(symbol, df):
                             'step': 2
                         })
                         m_msg = f"⚠️ **تنبيه مضاعفة أولى (Martingale x1)** 🔄\n💱 الزوج: `{symbol}` | الاتجاه: `{sig_type}`\n💡 *جاري تفعيل المضاعفة لتعويض الصفقة السابقة...*"
-                        send_telegram_message(m_msg)
+                       send_telegram_message(m_msg)
                     else:
                         global_stats["losses"] += 1
                         global_stats["total"] += 1
