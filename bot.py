@@ -7,7 +7,7 @@ import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import os
 
-# خادم ويب وهمي لرضا موقع Render عن الـ Port
+# خادم ويب وهمي لرضا موقع Render عن الـ Port وابقاء البوت مستيقظاً
 class SimpleHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -16,8 +16,13 @@ class SimpleHandler(BaseHTTPRequestHandler):
 
 def run_web_server():
     port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(('0.0.0.0', port), SimpleHandler)
-    server.serve_forever()
+    while True:
+        try:
+            server = HTTPServer(('0.0.0.0', port), SimpleHandler)
+            server.serve_forever()
+        except Exception as e:
+            print(f"Web server error: {e}")
+            time.sleep(5)
 
 t = threading.Thread(target=run_web_server)
 t.daemon = True
@@ -39,7 +44,6 @@ global_stats = {
     "total": 0
 }
 
-# تتبع وقت آخر إشارة لكل زوج (ضبط الاستراحة لتوزيع الفرص بانتظام)
 last_signal_time = {sym: 0 for sym in SYMBOLS}
 pending_signals = []
 
@@ -51,7 +55,7 @@ def send_telegram_message(message):
         "parse_mode": "Markdown"
     }
     try:
-        response = requests.post(url, json=payload)
+        response = requests.post(url, json=payload, timeout=10)
         return response.json()
     except Exception as e:
         print(f"خطأ في إرسال التيليجرام: {e}")
@@ -60,7 +64,7 @@ def fetch_market_data(symbol):
     try:
         url = f"https://query1.finance.yahoo.com/v7/finance/chart/{symbol}=X?interval=1m&range=1d"
         headers = {'User-Agent': 'Mozilla/5.0'}
-        res = requests.get(url, headers=headers)
+        res = requests.get(url, headers=headers, timeout=10)
         data = res.json()
         result = data['chart']['result'][0]
         timestamps = result['timestamp']
@@ -79,9 +83,6 @@ def fetch_market_data(symbol):
         return None
 
 def check_pending_signals(symbol, df):
-    """
-    تتبع الصفقات المعلقة ونظام المضاعفة الواحدة (Martingale x1) على فريم الدقيقة
-    """
     global pending_signals, global_stats
     if df is None or len(df) < 3:
         return
@@ -114,7 +115,6 @@ def check_pending_signals(symbol, df):
                     send_telegram_message(res_msg)
                 else:
                     if step == 1:
-                        # تفعيل مضاعفة أولى على شمعة الدقيقة التالية فوراً
                         next_open = df['open'].iloc[-1]
                         remaining_signals.append({
                             'symbol': symbol,
@@ -122,12 +122,12 @@ def check_pending_signals(symbol, df):
                             'price': next_open,
                             'step': 2
                         })
-                        m_msg = f"⚠️ **تنبيه مضاعفة أولى (Martingale x1) على فريم 1M** 🔄\n💱 الزوج: `{symbol}` | الاتجاه: `{sig_type}`\n💡 *جاري تفعيل المضاعفة لتعويض الصفقة السابقة...*"
+                        m_msg = f"⚠️ **تنبيه مضاعفة أولى (Martingale x1)** 🔄\n💱 الزوج: `{symbol}` | الاتجاه: `{sig_type}`\n💡 *جاري تفعيل المضاعفة لتعويض الصفقة السابقة...*"
                         send_telegram_message(m_msg)
                     else:
                         global_stats["losses"] += 1
                         global_stats["total"] += 1
-                        loss_msg = f"❌ **نتيجة صفقة 1M: خاسرة (LOSS)** ⚠️\n💱 الزوج: `{symbol}` | الاتجاه: `{sig_type}`\n💰 الدخول: `{entry_price}` | الإغلاق: `{current_close}`\n📉 *فشلت الصفقة مع المضاعفة على فريم الدقيقة*"
+                        loss_msg = f"❌ **نتيجة صفقة 1M: خاسرة (LOSS)** ⚠️\n💱 الزوج: `{symbol}` | الاتجاه: `{sig_type}`\n💰 الدخول: `{entry_price}` | الإغلاق: `{current_close}`\n📉 *فشلت الصفقة مع المضاعفة*"
                         send_telegram_message(loss_msg)
             else:
                 remaining_signals.append(sig)
@@ -138,7 +138,6 @@ def process_symbol(symbol):
     global pending_signals, last_signal_time
     
     current_time = time.time()
-    # استراحة 180 ثانية (3 دقائق) لكل زوج لضمان انتظام تدفق الفرص وعدم التكدس
     if current_time - last_signal_time[symbol] < 180:
         return
 
@@ -148,7 +147,6 @@ def process_symbol(symbol):
     
     check_pending_signals(symbol, df)
     
-    # مؤشرات التحليل الفني على فريم الدقيقة (1M)
     df['ema9'] = df['close'].ewm(span=9, adjust=False).mean()
     df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
     df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
@@ -189,7 +187,6 @@ def process_symbol(symbol):
         emoji = 'صعود - CALL' if signal_type == 'CALL' else 'هبوط - PUT'
         emoji_icon = '🟢' if signal_type == 'CALL' else '🔴'
         
-        # ضبط توقيت الدخول مع شمعة الدقيقة القادمة بدقة تامة على رأس الدقيقة (الثانية 00)
         now_dt = datetime.now()
         next_candle_dt = (now_dt + timedelta(minutes=1)).replace(second=0, microsecond=0)
         time_str = next_candle_dt.strftime('%H:%M:%S')
@@ -215,53 +212,61 @@ def process_symbol(symbol):
                 'price': current_open,
                 'step': 1
             })
-        print(f"تم إرسال إشارة 1M لـ {symbol}")
 
 def run_bot_loop():
+    print("🚀 Bot loop started...")
     while True:
-        threads = []
-        for symbol in SYMBOLS:
-            t = threading.Thread(target=process_symbol, args=(symbol,))
-            t.start()
-            threads.append(t)
-            
-        for t in threads:
-            t.join()
-            
+        try:
+            for symbol in SYMBOLS:
+                process_symbol(symbol)
+                time.sleep(2)
+        except Exception as e:
+            print(f"Error in main loop: {e}")
         time.sleep(20)
 
 def send_periodic_results():
     global global_stats
-    with stats_lock:
-        wins = global_stats["wins"]
-        wins_m1 = global_stats["wins_m1"]
-        losses = global_stats["losses"]
-        total = global_stats["total"]
-        
-        total_wins = wins + wins_m1
-        win_rate = (total_wins / total) * 100 if total > 0 else 0.0
-        
-        report = (
-            f"📊 **الملخص الدوري للأداء (كل 5 دقائق)** 📊\n"
-            f"━━━━━━━━━━━━━━━━━━━\n"
-            f"🎯 إجمالي الصفقات المنتهية: `{total}`\n"
-            f"✅ ربح بدون مضاعفة: `{wins}` ✅\n"
-            f"✅ ربح بمضاعفة واحدة: `{wins_m1}` ✅1\n"
-            f"❌ صفقات خاسرة: `{losses}`\n"
-            f"📈 نسبة الفوز الإجمالية: `{win_rate:.1f}%`\n"
-            f"━━━━━━━━━━━━━━━━━━━\n"
-            f"💎 *LEGEND-X 1M PRO BOT*"
-        )
-        send_telegram_message(report)
+    while True:
+        time.sleep(300)
+        try:
+            with stats_lock:
+                wins = global_stats["wins"]
+                wins_m1 = global_stats["wins_m1"]
+                losses = global_stats["losses"]
+                total = global_stats["total"]
+                
+                total_wins = wins + wins_m1
+                win_rate = (total_wins / total) * 100 if total > 0 else 0.0
+                
+                report = (
+                    f"📊 **الملخص الدوري للأداء (كل 5 دقائق)** 📊\n"
+                    f"━━━━━━━━━━━━━━━━━━━\n"
+                    f"🎯 إجمالي الصفقات المنتهية: `{total}`\n"
+                    f"✅ ربح بدون مضاعفة: `{wins}` ✅\n"
+                    f"✅ ربح بمضاعفة واحدة: `{wins_m1}` ✅1\n"
+                    f"❌ صفقات خاسرة: `{losses}`\n"
+                    f"📈 نسبة الفوز الإجمالية: `{win_rate:.1f}%`\n"
+                    f"━━━━━━━━━━━━━━━━━━━\n"
+                    f"💎 *LEGEND-X 1M PRO BOT*"
+                )
+                send_telegram_message(report)
+        except Exception as e:
+            print(f"Error in periodic results: {e}")
 
 if __name__ == "__main__":
-    print("🚀 بدء تشغيل البوت على فريم الدقيقة بفرص منتظمة كل عدة دقائق...")
-    send_telegram_message("🟢 **تم تفعيل النسخة الاحترافية على فريم الدقيقة (1M) لضمان تدفق الفرص بانتظام مع المضاعفة الواحدة!**")
+    print("🚀 تشغيل البوت مع الحماية الكاملة ضد التوقف...")
+    send_telegram_message("🟢 **تم تشغيل البوت بنسخة الحماية القصوى 24/7 (لن يتوقف أبداً)!**")
     
+    # تشغيل حلقة البوت الرئيسية في خيط مستقل
     bot_thread = threading.Thread(target=run_bot_loop)
     bot_thread.daemon = True
     bot_thread.start()
     
+    # تشغيل حلقة التقارير الدورية في خيط مستقل
+    report_thread = threading.Thread(target=send_periodic_results)
+    report_thread.daemon = True
+    report_thread.start()
+    
+    # إبقاء الملف الرئيسي يعمل للأبد
     while True:
-        time.sleep(300)
-        send_periodic_results()
+        time.sleep(3600)
