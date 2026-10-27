@@ -145,32 +145,36 @@ def process_symbol(symbol):
     is_uptrend = close_prev > ema20
     is_downtrend = close_prev < ema20
     
-    original_signal = None
+    # التحليل المباشر الأصلي بدون عكس
+    signal_type = None
     if is_uptrend and close_prev > open_prev:
-        original_signal = 'CALL'
+        signal_type = 'CALL'
     elif is_downtrend and close_prev < open_prev:
-        original_signal = 'PUT'
+        signal_type = 'PUT'
         
-    if original_signal:
-        # [عكس الاتجاه بالكامل لضمان ضرب الأرباح]:
-        signal_type = 'PUT' if original_signal == 'CALL' else 'CALL'
-        
+    if signal_type:
         last_signal_time[symbol] = current_time
         emoji = '🟢 (صعود - CALL)' if signal_type == 'CALL' else '🔴 (هبوط - PUT)'
+        
+        # حساب توقيت الإرسال ووقت نهاية الصفقة (بعد دقيقة واحدة)
+        now_dt = datetime.now()
+        time_str = now_dt.strftime('%H:%M:%S')
+        end_time_str = (now_dt + timedelta(minutes=1)).strftime('%H:%M:%S')
         
         msg = (
             f"⚡ **LEGEND FAST DIRECT SIGNAL** ⚡\n"
             f"━━━━━━━━━━━━━━━━━━━\n"
             f"💱 الزوج: `{symbol}` (سوق حقيقي)\n"
             f"📊 الإشارة: **{signal_type} {emoji}**\n"
-            f"⏰ الفريم: `1M` | الوقت: `{datetime.now().strftime('%H:%M:%S')}`\n"
+            f"⏰ وقت الإرسال: `{time_str}`\n"
+            f"⏳ وقت النهاية: `{end_time_str}` (مدة دقيقة)\n"
             f"💡 *الدخول مع افتتاح الشمعة القادمة لمدة دقيقة*"
         )
         
         send_telegram_message(msg)
         with stats_lock:
             pending_signals.append({'symbol': symbol, 'type': signal_type, 'price': current_open})
-        print(f"تم إرسال إشارة سريعة لـ {symbol} بسعر {current_open}")
+        print(f"تم إرسال إشارة مباشرة لـ {symbol} بسعر {current_open}")
 
 def run_bot_loop():
     while True:
@@ -207,8 +211,8 @@ def send_periodic_results():
         send_telegram_message(report)
 
 if __name__ == "__main__":
-    print("🚀 بدء تشغيل بوت الفحص السريع والمتوازي...")
-    send_telegram_message("🟢 **تم استعادة التنسيق المطلوب (إشارات سريعة مباشرة + نتائج ITM/OTM الفورية + عكس الاتجاه)!**")
+    print("🚀 بدء تشغيل البوت بالاتجاه الأصلي المباشر...")
+    send_telegram_message("🟢 **تم تحديث البوت: العودة للاتجاه الأصلي المباشر مع إضافة وقت نهاية الصفقة!**")
     
     bot_thread = threading.Thread(target=run_bot_loop)
     bot_thread.daemon = True
