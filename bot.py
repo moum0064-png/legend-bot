@@ -39,7 +39,7 @@ global_stats = {
     "total": 0
 }
 
-# تتبع وقت آخر إشارة لكل زوج (استراحة دقيقتين لمنع التكرار المزعج)
+# تتبع وقت آخر إشارة لكل زوج (ضبط الاستراحة لتوزيع الفرص بانتظام)
 last_signal_time = {sym: 0 for sym in SYMBOLS}
 pending_signals = []
 
@@ -80,7 +80,7 @@ def fetch_market_data(symbol):
 
 def check_pending_signals(symbol, df):
     """
-    تتبع الصفقات المعلقة ونظام المضاعفة الواحدة (Martingale x1) مع إرسال النتائج الفورية
+    تتبع الصفقات المعلقة ونظام المضاعفة الواحدة (Martingale x1) على فريم الدقيقة
     """
     global pending_signals, global_stats
     if df is None or len(df) < 3:
@@ -105,16 +105,16 @@ def check_pending_signals(symbol, df):
                 if is_win:
                     if step == 1:
                         global_stats["wins"] += 1
-                        res_msg = f"✅ **نتيجة الصفقة: رابحة (WIN)** 🎯\n💱 الزوج: `{symbol}` | الاتجاه: `{sig_type}`\n💰 الدخول: `{entry_price}` | الإغلاق: `{current_close}`\n✨ *ربح من الدخول الأساسي (بدون مضاعفة ✅)*"
+                        res_msg = f"✅ **نتيجة صفقة 1M: رابحة (WIN)** 🎯\n💱 الزوج: `{symbol}` | الاتجاه: `{sig_type}`\n💰 الدخول: `{entry_price}` | الإغلاق: `{current_close}`\n✨ *ربح من الدخول الأساسي (بدون مضاعفة ✅)*"
                     else:
                         global_stats["wins_m1"] += 1
-                        res_msg = f"✅1 **نتيجة الصفقة: رابحة بالمضاعفة (WIN M1)** 🎯\n💱 الزوج: `{symbol}` | الاتجاه: `{sig_type}`\n💰 الدخول: `{entry_price}` | الإغلاق: `{current_close}`\n✨ *ربح بمضاعفة واحدة (✅1)*"
+                        res_msg = f"✅1 **نتيجة صفقة 1M: رابحة بالمضاعفة (WIN M1)** 🎯\n💱 الزوج: `{symbol}` | الاتجاه: `{sig_type}`\n💰 الدخول: `{entry_price}` | الإغلاق: `{current_close}`\n✨ *ربح بمضاعفة واحدة (✅1)*"
                     
                     global_stats["total"] += 1
                     send_telegram_message(res_msg)
                 else:
                     if step == 1:
-                        # فشلت الصفقة الأساسية، نقوم بفتح مضاعفة أولى (Martingale x1) فوراً على الشمعة الحالية
+                        # تفعيل مضاعفة أولى على شمعة الدقيقة التالية فوراً
                         next_open = df['open'].iloc[-1]
                         remaining_signals.append({
                             'symbol': symbol,
@@ -122,13 +122,12 @@ def check_pending_signals(symbol, df):
                             'price': next_open,
                             'step': 2
                         })
-                        m_msg = f"⚠️ **تنبيه مضاعفة أولى (Martingale x1)** 🔄\n💱 الزوج: `{symbol}` | الاتجاه: `{sig_type}`\n💡 *جاري تفعيل المضاعفة لتعويض الصفقة السابقة...*"
+                        m_msg = f"⚠️ **تنبيه مضاعفة أولى (Martingale x1) على فريم 1M** 🔄\n💱 الزوج: `{symbol}` | الاتجاه: `{sig_type}`\n💡 *جاري تفعيل المضاعفة لتعويض الصفقة السابقة...*"
                         send_telegram_message(m_msg)
                     else:
-                        # فشلت حتى المضاعفة الأولى
                         global_stats["losses"] += 1
                         global_stats["total"] += 1
-                        loss_msg = f"❌ **نتيجة الصفقة: خاسرة (LOSS)** ⚠️\n💱 الزوج: `{symbol}` | الاتجاه: `{sig_type}`\n💰 الدخول: `{entry_price}` | الإغلاق: `{current_close}`\n📉 *فشلت الصفقة مع المضاعفة الأولى*"
+                        loss_msg = f"❌ **نتيجة صفقة 1M: خاسرة (LOSS)** ⚠️\n💱 الزوج: `{symbol}` | الاتجاه: `{sig_type}`\n💰 الدخول: `{entry_price}` | الإغلاق: `{current_close}`\n📉 *فشلت الصفقة مع المضاعفة على فريم الدقيقة*"
                         send_telegram_message(loss_msg)
             else:
                 remaining_signals.append(sig)
@@ -139,7 +138,8 @@ def process_symbol(symbol):
     global pending_signals, last_signal_time
     
     current_time = time.time()
-    if current_time - last_signal_time[symbol] < 120:  # استراحة دقيقتين
+    # استراحة 180 ثانية (3 دقائق) لكل زوج لضمان انتظام تدفق الفرص وعدم التكدس
+    if current_time - last_signal_time[symbol] < 180:
         return
 
     df = fetch_market_data(symbol)
@@ -148,7 +148,7 @@ def process_symbol(symbol):
     
     check_pending_signals(symbol, df)
     
-    # مؤشرات التحليل الاحترافي المتقدم (EMA 9/20/50 + Bollinger Bands)
+    # مؤشرات التحليل الفني على فريم الدقيقة (1M)
     df['ema9'] = df['close'].ewm(span=9, adjust=False).mean()
     df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
     df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
@@ -175,13 +175,13 @@ def process_symbol(symbol):
     
     current_open = df['open'].iloc[-1]
     
-    is_strong_uptrend = (ema9 > ema20) and (ema20 > ema50) and (close_prev > bb_upper * 0.99) and (vol >= vol_avg)
-    is_strong_downtrend = (ema9 < ema20) and (ema20 < ema50) and (close_prev < bb_lower * 1.01) and (vol >= vol_avg)
+    is_uptrend = (ema9 > ema20) and (close_prev > bb_upper * 0.99) and (vol >= vol_avg * 0.9)
+    is_downtrend = (ema9 < ema20) and (close_prev < bb_lower * 1.01) and (vol >= vol_avg * 0.9)
     
     signal_type = None
-    if is_strong_uptrend and close_prev > open_prev:
+    if is_uptrend and close_prev > open_prev:
         signal_type = 'CALL'
-    elif is_strong_downtrend and close_prev < open_prev:
+    elif is_downtrend and close_prev < open_prev:
         signal_type = 'PUT'
         
     if signal_type:
@@ -189,7 +189,7 @@ def process_symbol(symbol):
         emoji = 'صعود - CALL' if signal_type == 'CALL' else 'هبوط - PUT'
         emoji_icon = '🟢' if signal_type == 'CALL' else '🔴'
         
-        # ضبط توقيت البداية والنهاية للشمعة القادمة بدقة على رأس الدقيقة (الثانية 00)
+        # ضبط توقيت الدخول مع شمعة الدقيقة القادمة بدقة تامة على رأس الدقيقة (الثانية 00)
         now_dt = datetime.now()
         next_candle_dt = (now_dt + timedelta(minutes=1)).replace(second=0, microsecond=0)
         time_str = next_candle_dt.strftime('%H:%M:%S')
@@ -197,14 +197,14 @@ def process_symbol(symbol):
         end_5m = (next_candle_dt + timedelta(minutes=5)).strftime('%H:%M:%S')
         
         msg = (
-            f"⚡ **LEGEND-X PRO ANALYZER** ⚡\n"
+            f"⚡ **LEGEND-X 1M PRO ANALYZER** ⚡\n"
             f"━━━━━━━━━━━━━━━━━━━\n"
             f"💱 الزوج: `{symbol}` (سوق حقيقي)\n"
             f"📊 الإشارة: `{signal_type}` {emoji_icon} `({emoji})`\n"
-            f"⏰ وقت الإرسال والدخول (الشمعة القادمة): `{time_str}`\n"
+            f"⏰ الفريم: `1M` | وقت الدخول: `{time_str}`\n"
             f"⏳ نهاية صفقة الدقيقة: `{end_1m}`\n"
             f"⏳ نهاية صفقة الـ 5 دقائق: `{end_5m}`\n"
-            f"💡 حاول اخذ الصفقة مارجنال + ادارة رأس المال (مضاعفة أولى عند اللزوم)"
+            f"💡 *تحليل فني دقيق على فريم الدقيقة (مارجنال + مضاعفة أولى عند اللزوم)*"
         )
         
         send_telegram_message(msg)
@@ -215,7 +215,7 @@ def process_symbol(symbol):
                 'price': current_open,
                 'step': 1
             })
-        print(f"تم إرسال إشارة مباشرة للشمعة القادمة لـ {symbol}")
+        print(f"تم إرسال إشارة 1M لـ {symbol}")
 
 def run_bot_loop():
     while True:
@@ -250,13 +250,13 @@ def send_periodic_results():
             f"❌ صفقات خاسرة: `{losses}`\n"
             f"📈 نسبة الفوز الإجمالية: `{win_rate:.1f}%`\n"
             f"━━━━━━━━━━━━━━━━━━━\n"
-            f"💎 *LEGEND-X PRO BOT*"
+            f"💎 *LEGEND-X 1M PRO BOT*"
         )
         send_telegram_message(report)
 
 if __name__ == "__main__":
-    print("🚀 بدء تشغيل البوت بالاتجاه الأصلي المباشر + الشمعة القادمة + المضاعفة...")
-    send_telegram_message("🟢 **تم تفعيل النسخة بالاتجاه الأصلي المباشر + الشمعة القادمة + مضاعفة واحدة (✅ / ✅1)!**")
+    print("🚀 بدء تشغيل البوت على فريم الدقيقة بفرص منتظمة كل عدة دقائق...")
+    send_telegram_message("🟢 **تم تفعيل النسخة الاحترافية على فريم الدقيقة (1M) لضمان تدفق الفرص بانتظام مع المضاعفة الواحدة!**")
     
     bot_thread = threading.Thread(target=run_bot_loop)
     bot_thread.daemon = True
