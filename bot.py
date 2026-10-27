@@ -32,8 +32,8 @@ t.start()
 TELEGRAM_BOT_TOKEN = "7023463264:AAEL8N3HR5GxRhf0T9M_IW0VfY7_r797Ifs"
 TELEGRAM_CHANNEL_ID = "-1002330262707"
 
-# التركيز على زوج واحد فقط
-TARGET_SYMBOL = "EURUSD"
+# تفعيل جميع الأزواج لضمان تدفق الصفقات دون توقف
+SYMBOLS = ["EURUSD", "EURGBP", "EURJPY", "USDJPY"]
 
 # إحصائيات الأداء العامة
 stats_lock = threading.Lock()
@@ -44,7 +44,7 @@ global_stats = {
     "total": 0
 }
 
-last_signal_time = 0
+last_signal_time = {sym: 0 for sym in SYMBOLS}
 pending_signals = []
 
 def send_telegram_message(message):
@@ -82,7 +82,7 @@ def fetch_market_data(symbol):
     except Exception as e:
         return None
 
-def check_pending_signals(df, symbol):
+def check_pending_signals(symbol, df):
     global pending_signals, global_stats
     if df is None or len(df) < 3:
         return
@@ -143,76 +143,83 @@ def check_pending_signals(df, symbol):
                 
         pending_signals = remaining_signals
 
-def run_bot_loop():
-    global last_signal_time, pending_signals
-    print(f"🚀 Started active single-pair bot for {TARGET_SYMBOL}...")
-    send_telegram_message(f"🟢 **تم تنشيط بوت الجلسات السريعة على زوج (`{TARGET_SYMBOL}`) بنجاح!**")
+def process_symbol(symbol):
+    global pending_signals, last_signal_time
     
+    current_time = time.time()
+    # استراحة قصيرة جداً لكل زوج (45 ثانية فقط) لضمان تدفق الصفقات بكثافة
+    if current_time - last_signal_time[symbol] < 45:
+        return
+
+    df = fetch_market_data(symbol)
+    if df is None:
+        return
+    
+    check_pending_signals(symbol, df)
+    
+    # مؤشرات سريعة وقوية للزخم (EMA 5 & 10)
+    df['ema5'] = df['close'].ewm(span=5, adjust=False).mean()
+    df['ema10'] = df['close'].ewm(span=10, adjust=False).mean()
+    
+    i = len(df) - 2
+    if i < 3:
+        return
+        
+    close_p = df['close'].iloc[i]
+    open_p = df['open'].iloc[i]
+    ema5 = df['ema5'].iloc[i]
+    ema10 = df['ema10'].iloc[i]
+    current_open = df['open'].iloc[-1]
+    
+    signal_type = None
+    if ema5 > ema10 and close_p > open_p:
+        signal_type = 'CALL'
+    elif ema5 < ema10 and close_p < open_p:
+        signal_type = 'PUT'
+        
+    if signal_type:
+        last_signal_time[symbol] = current_time
+        emoji = 'صعود - CALL' if signal_type == 'CALL' else 'هبوط - PUT'
+        emoji_icon = '🟢' if signal_type == 'CALL' else '🔴'
+        
+        now_dt = datetime.now()
+        next_candle_dt = (now_dt + timedelta(minutes=1)).replace(second=0, microsecond=0)
+        target_ts = int(next_candle_dt.timestamp()) + 60
+        
+        time_str = next_candle_dt.strftime('%H:%M:%S')
+        end_1m = (next_candle_dt + timedelta(minutes=1)).strftime('%H:%M:%S')
+        end_5m = (next_candle_dt + timedelta(minutes=5)).strftime('%H:%M:%S')
+        
+        msg = (
+            f"⚡ **LEGEND-X MULTI-SESSION PRO** ⚡\n"
+            f"━━━━━━━━━━━━━━━━━━━\n"
+            f"💱 الزوج: `{symbol}` (سوق حقيقي)\n"
+            f"📊 الإشارة: `{signal_type}` {emoji_icon} `({emoji})`\n"
+            f"⏰ الفريم: `1M` | وقت الدخول: `{time_str}`\n"
+            f"⏳ نهاية صفقة الدقيقة: `{end_1m}`\n"
+            f"⏳ نهاية صفقة الـ 5 دقائق: `{end_5m}`\n"
+            f"🔥 *صفقة مكثفة بنظام الزخم السريع (مضاعفة أولى عند اللزوم)*"
+        )
+        
+        send_telegram_message(msg)
+        with stats_lock:
+            pending_signals.append({
+                'symbol': symbol,
+                'type': signal_type,
+                'price': current_open,
+                'step': 1,
+                'target_ts': target_ts
+            })
+
+def run_bot_loop():
+    print("🚀 Multi-symbol session loop started...")
     while True:
         try:
-            df = fetch_market_data(TARGET_SYMBOL)
-            if df is not None:
-                check_pending_signals(df, TARGET_SYMBOL)
-                
-                # حساب مؤشرات سريعة وقوية (EMA + Momentum) لتوليد صفقات متتالية ونشطة
-                df['ema5'] = df['close'].ewm(span=5, adjust=False).mean()
-                df['ema10'] = df['close'].ewm(span=10, adjust=False).mean()
-                
-                i = len(df) - 2
-                if i >= 3:
-                    current_time = time.time()
-                    # استراحة قصيرة جداً (45 ثانية فقط) لضمان ضخ إشارات متتالية
-                    if current_time - last_signal_time >= 45:
-                        close_p = df['close'].iloc[i]
-                        open_p = df['open'].iloc[i]
-                        ema5 = df['ema5'].iloc[i]
-                        ema10 = df['ema10'].iloc[i]
-                        current_open = df['open'].iloc[-1]
-                        
-                        signal_type = None
-                        # شروط سريعة وقوية تعتمد على تقاطع المتوسطات وزخم الشمعة
-                        if ema5 > ema10 and close_p > open_p:
-                            signal_type = 'CALL'
-                        elif ema5 < ema10 and close_p < open_p:
-                            signal_type = 'PUT'
-                            
-                        if signal_type:
-                            last_signal_time = current_time
-                            emoji = 'صعود - CALL' if signal_type == 'CALL' else 'هبوط - PUT'
-                            emoji_icon = '🟢' if signal_type == 'CALL' else '🔴'
-                            
-                            now_dt = datetime.now()
-                            next_candle_dt = (now_dt + timedelta(minutes=1)).replace(second=0, microsecond=0)
-                            target_ts = int(next_candle_dt.timestamp()) + 60
-                            
-                            time_str = next_candle_dt.strftime('%H:%M:%S')
-                            end_1m = (next_candle_dt + timedelta(minutes=1)).strftime('%H:%M:%S')
-                            end_5m = (next_candle_dt + timedelta(minutes=5)).strftime('%H:%M:%S')
-                            
-                            msg = (
-                                f"⚡ **LEGEND-X CHINESE SESSION PRO** ⚡\n"
-                                f"━━━━━━━━━━━━━━━━━━━\n"
-                                f"💱 الزوج: `{TARGET_SYMBOL}` (جلسة مكثفة)\n"
-                                f"📊 الإشارة: `{signal_type}` {emoji_icon} `({emoji})`\n"
-                                f"⏰ الفريم: `1M` | وقت الدخول: `{time_str}`\n"
-                                f"⏳ نهاية صفقة الدقيقة: `{end_1m}`\n"
-                                f"⏳ نهاية صفقة الـ 5 دقائق: `{end_5m}`\n"
-                                f"🔥 *صفقة سريعة بنظام الزخم النشط (مضاعفة أولى عند اللزوم)*"
-                            )
-                            
-                            send_telegram_message(msg)
-                            with stats_lock:
-                                pending_signals.append({
-                                    'symbol': TARGET_SYMBOL,
-                                    'type': signal_type,
-                                    'price': current_open,
-                                    'step': 1,
-                                    'target_ts': target_ts
-                                })
-            
+            for symbol in SYMBOLS:
+                process_symbol(symbol)
+                time.sleep(2) # فحص سريع بين كل زوج والآخر
         except Exception as e:
-            print(f"Error in active loop: {e}")
-        
+            print(f"Error in main loop: {e}")
         time.sleep(10)
 
 def send_periodic_results():
@@ -230,22 +237,23 @@ def send_periodic_results():
                 win_rate = (total_wins / total) * 100 if total > 0 else 0.0
                 
                 report = (
-                    f"📊 **الملخص الدوري للجلسة (كل 5 دقائق)** 📊\n"
+                    f"📊 **الملخص الدوري للجلسة المكثفة (كل 5 دقائق)** 📊\n"
                     f"━━━━━━━━━━━━━━━━━━━\n"
                     f"🎯 إجمالي الصفقات: `{total}`\n"
                     f"✅ ربح أساسي: `{wins}` ✅\n"
                     f"✅ ربح مضاعفة: `{wins_m1}` ✅1\n"
                     f"❌ صفقات خاسرة: `{losses}`\n"
-                    f"📈 نسبة الفوز: `{win_rate:.1f}%`\n"
+                    f"📈 نسبة الفوز الإجمالية: `{win_rate:.1f}%`\n"
                     f"━━━━━━━━━━━━━━━━━━━\n"
-                    f"💎 *LEGEND-X CHINESE SESSIONS*"
+                    f"💎 *LEGEND-X MULTI-PAIR SESSIONS*"
                 )
                 send_telegram_message(report)
         except Exception as e:
             print(f"Error in periodic results: {e}")
 
 if __name__ == "__main__":
-    print(f"🚀 بدء التشغيل بنظام الجلسات المكثفة لزوج {TARGET_SYMBOL}...")
+    print("🚀 تشغيل البوت بجميع الأزواج ونظام التدفق السريع...")
+    send_telegram_message("🟢 **تم تفعيل وضع الجلسات المكثفة على جميع الأزواج الأربعة (EURUSD, EURGBP, EURJPY, USDJPY)!**")
     
     bot_thread = threading.Thread(target=run_bot_loop)
     bot_thread.daemon = True
