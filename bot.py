@@ -82,6 +82,9 @@ def fetch_market_data(symbol):
         return None
 
 def process_pending_signals(symbol, df):
+    """
+    تتبع النتائج وإرسالها فوراً إلى التيليجرام عند انتهاء الصفقة أو عند الحاجة للمضاعفة
+    """
     global pending_signals, global_stats, symbol_stats
     if df is None or len(df) < 3:
         return
@@ -105,12 +108,18 @@ def process_pending_signals(symbol, df):
                 if is_win:
                     if step == 1:
                         global_stats["wins"] += 1
+                        symbol_stats[symbol]["wins"] += 1
+                        res_msg = f"✅ **نتيجة صفقة رابحة (WIN)** 🎯\n💱 الزوج: `{symbol}`\n📈 الاتجاه: `{sig_type}`\n💰 الدخول: `{entry_price}` | الإغلاق: `{current_close}`\n✨ *ربح من الدخول الأساسي بدون مضاعفة ✅*"
                     else:
                         global_stats["wins_m1"] += 1
+                        symbol_stats[symbol]["wins"] += 1
+                        res_msg = f"✅1 **نتيجة صفقة رابحة بالمضاعفة (WIN Martingale)** 🎯\n💱 الزوج: `{symbol}`\n📈 الاتجاه: `{sig_type}`\n💰 الدخول: `{entry_price}` | الإغلاق: `{current_close}`\n✨ *ربح بمضاعفة واحدة ✅1*"
+                    
                     global_stats["total"] += 1
-                    symbol_stats[symbol]["wins"] += 1
+                    send_telegram_message(res_msg)
                 else:
                     if step == 1:
+                        # فشلت الصفقة الأولى، نفتح مضاعفة أولى فوراً على الشمعة التالية
                         next_open = df['open'].iloc[-1]
                         remaining_signals.append({
                             'symbol': symbol,
@@ -118,10 +127,17 @@ def process_pending_signals(symbol, df):
                             'price': next_open,
                             'step': 2
                         })
+                        # إشعار بتفعيل المضاعفة الأولى
+                        m_msg = f"⚠️ **تنبيه مضاعفة أولى (Martingale x1)** 🔄\n💱 الزوج: `{symbol}`\n📈 الاتجاه: `{sig_type}`\n💡 *جاري فتح مضاعفة لتعويض الخسارة السابقة...*"
+                        send_telegram_message(m_msg)
                     else:
+                        # فشلت حتى المضاعفة الأولى
                         global_stats["losses"] += 1
                         global_stats["total"] += 1
                         symbol_stats[symbol]["losses"] += 1
+                        
+                        loss_msg = f"❌ **نتيجة صفقة خاسرة (LOSS)** ⚠️\n💱 الزوج: `{symbol}`\n📈 الاتجاه: `{sig_type}`\n💰 الدخول: `{entry_price}` | الإغلاق: `{current_close}`\n📉 *فشلت الصفقة مع المضاعفة*"
+                        send_telegram_message(loss_msg)
             else:
                 remaining_signals.append(sig)
                 
@@ -159,7 +175,6 @@ def process_symbol(symbol):
     is_uptrend = close_prev > ema20
     is_downtrend = close_prev < ema20
     
-    # تحديد الاتجاه الأصلي بناءً على التحليل
     original_signal = None
     if is_uptrend and close_prev > open_prev:
         original_signal = 'CALL'
@@ -167,13 +182,13 @@ def process_symbol(symbol):
         original_signal = 'PUT'
         
     if original_signal:
-        # [عكس الاتجاه بالكامل]: قلب الإشارة فوراً لتحويل الخسارة إلى أرباح
+        # عكس الاتجاه بالكامل
         signal_type = 'PUT' if original_signal == 'CALL' else 'CALL'
         
         last_signal_time[symbol] = current_time
         emoji = '🟢 (صعود عكسي - CALL)' if signal_type == 'CALL' else '🔴 (هبوط عكسي - PUT)'
         
-        # ضبط وقت بداية الشمعة القادمة بدقة على رأس الدقيقة (الثانية 00)
+        # توقيت الشمعة القادمة بدقة على رأس الدقيقة
         now_dt = datetime.now()
         next_candle_dt = (now_dt + timedelta(minutes=1)).replace(second=0, microsecond=0)
         start_time_str = next_candle_dt.strftime('%H:%M:%S')
@@ -192,7 +207,7 @@ def process_symbol(symbol):
             })
 
         msg = (
-            f"⚡ **LEGEND REVERSED SIGNAL - صفقات عكسية ذكية** ⚡\n"
+            f"⚡ **LEGEND SIGNAL - صفقات عكسية ذكية** ⚡\n"
             f"━━━━━━━━━━━━━━━━━━━\n"
             f"💱 الزوج: `{symbol}` (سوق حقيقي)\n"
             f"📊 الإشارة المعاكسة: **{signal_type} {emoji}**\n"
@@ -205,7 +220,7 @@ def process_symbol(symbol):
         )
         
         send_telegram_message(msg)
-        print(f"تم إرسال إشارة عكسية لـ {symbol}")
+        print(f"تم إرسال إشارة لـ {symbol}")
 
 def run_bot_loop():
     while True:
@@ -220,4 +235,38 @@ def run_bot_loop():
             
         time.sleep(20)
 
-def send_periodic_results
+def send_periodic_results():
+    global global_stats
+    with stats_lock:
+        wins = global_stats["wins"]
+        wins_m1 = global_stats["wins_m1"]
+        losses = global_stats["losses"]
+        total = global_stats["total"]
+        
+        total_wins = wins + wins_m1
+        win_rate = (total_wins / total) * 100 if total > 0 else 0.0
+        
+        report = (
+            f"📊 **الملخص الدوري للأداء الشامل (كل 5 دقائق)** 📊\n"
+            f"━━━━━━━━━━━━━━━━━━━\n"
+            f"🎯 إجمالي الصفقات المنتهية: `{total}`\n"
+            f"✅ ربح بدون مضاعفة: `{wins}` ✅\n"
+            f"✅ ربح بمضاعفة واحدة: `{wins_m1}` ✅1\n"
+            f"❌ صفقات خاسرة: `{losses}`\n"
+            f"📈 نسبة الفوز الإجمالية: `{win_rate:.1f}%`\n"
+            f"━━━━━━━━━━━━━━━━━━━\n"
+            f"💎 *LEGEND - ACTIVE RESULTS BOT*"
+        )
+        send_telegram_message(report)
+
+if __name__ == "__main__":
+    print("🚀 بدء تشغيل البوت مع تفعيل نتائج الصفقات الفورية...")
+    send_telegram_message("🟢 **تم تحديث البوت: تفعيل إرسال نتائج الصفقات فوراً (مع الرموز ✅ و ✅1) بجانب الإشارات والملخص الدوري!**")
+    
+    bot_thread = threading.Thread(target=run_bot_loop)
+    bot_thread.daemon = True
+    bot_thread.start()
+    
+    while True:
+        time.sleep(300)
+        send_periodic_results()
