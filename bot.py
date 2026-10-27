@@ -27,7 +27,7 @@ t.start()
 TELEGRAM_BOT_TOKEN = "7023463264:AAEL8N3HR5GxRhf0T9M_IW0VfY7_r797Ifs"
 TELEGRAM_CHANNEL_ID = "-1002330262707"
 
-# الأزواج الأربعة المطلوبة فقط
+# الأزواج الأربعة المحددة
 SYMBOLS = ["EURUSD", "EURGBP", "EURJPY", "USDJPY"]
 
 # متغيرات الإحصائيات العامة والدورية
@@ -42,7 +42,7 @@ global_stats = {
 # إحصائيات خاصة بكل زوج
 symbol_stats = {sym: {"wins": 0, "losses": 0} for sym in SYMBOLS}
 
-# تتبع وقت آخر إشارة لكل زوج لعمل الاستراحة (دقيقتين)
+# تتبع وقت آخر إشارة لكل زوج (استراحة دقيقتين)
 last_signal_time = {sym: 0 for sym in SYMBOLS}
 pending_signals = []
 
@@ -130,7 +130,6 @@ def process_pending_signals(symbol, df):
 def process_symbol(symbol):
     global pending_signals, last_signal_time
     
-    # فحص فترة الاستراحة (دقيقتان = 120 ثانية)
     current_time = time.time()
     if current_time - last_signal_time[symbol] < 120:
         return
@@ -167,15 +166,14 @@ def process_symbol(symbol):
         signal_type = 'PUT'
         
     if signal_type:
-        # تحديث وقت آخر إشارة لهذا الزوج لبدء الاستراحة
         last_signal_time[symbol] = current_time
-        
         emoji = '🟢 (صعود - CALL)' if signal_type == 'CALL' else '🔴 (هبوط - PUT)'
         
-        # حساب توقيت البداية والنهاية للصفقة (مدة دقيقة واحدة)
+        # [ضبط التوقيت بدقة للشمعة القادمة]: جعل وقت البداية يبدأ مع الدقيقة الجديدة تماماً (الثانية 00)
         now_dt = datetime.now()
-        start_time_str = now_dt.strftime('%H:%M:%S')
-        end_time_str = (now_dt + timedelta(minutes=1)).strftime('%H:%M:%S')
+        next_candle_dt = (now_dt + timedelta(minutes=1)).replace(second=0, microsecond=0)
+        start_time_str = next_candle_dt.strftime('%H:%M:%S')
+        end_time_str = (next_candle_dt + timedelta(minutes=1)).strftime('%H:%M:%S')
         
         with stats_lock:
             s_wins = symbol_stats[symbol]["wins"]
@@ -196,14 +194,14 @@ def process_symbol(symbol):
             f"📊 الإشارة: **{signal_type} {emoji}**\n"
             f"⏰ وقت البداية: `{start_time_str}`\n"
             f"⏳ وقت النهاية: `{end_time_str}` (مدة دقيقة)\n"
-            f"💡 *الدخول مع افتتاح الشمعة القادمة (مضاعفة واحدة عند اللزوم)*\n"
+            f"💡 *الدخول مع افتتاح الشمعة القادمة بدقة (مضاعفة واحدة عند اللزوم)*\n"
             f"━━━━━━━━━━━━━━━━━━━\n"
             f"📈 **إحصائيات الزوج ({symbol}):**\n"
             f"🎯 صفقاته: `{s_total}` | ✅ رابحة: `{s_wins}` | ❌ خاسرة: `{s_losses}`"
         )
         
         send_telegram_message(msg)
-        print(f"تم إرسال إشارة لـ {symbol} مع تطبيق الاستراحة وتوقيت الصفقة")
+        print(f"تم إرسال إشارة لـ {symbol} وتعديل توقيت الشمعة القادمة بدقة")
 
 def run_bot_loop():
     while True:
@@ -238,13 +236,13 @@ def send_periodic_results():
             f"❌ صفقات خاسرة: `{losses}`\n"
             f"📈 نسبة الفوز الإجمالية: `{win_rate:.1f}%`\n"
             f"━━━━━━━━━━━━━━━━━━━\n"
-            f"💎 *LEGEND - 4 MAJOR PAIRS BOT*"
+            f"💎 *LEGEND - NEXT CANDLE BOT*"
         )
         send_telegram_message(report)
 
 if __name__ == "__main__":
-    print("🚀 بدء تشغيل البوت المحدث (4 أزواج + استراحة دقيقتين + أوقات الصفقات)...")
-    send_telegram_message("🟢 **تم تحديث البوت: تفعيل 4 أزواج رئيسية فقط، تحديد أوقات البداية والنهاية، واستراحة دقيقتين لكل زوج بعد الإشارة!**")
+    print("🚀 بدء تشغيل البوت بتوقيت الشمعة القادمة المضبوط بدقة...")
+    send_telegram_message("🟢 **تم تحديث توقيت البداية والنهاية ليطابق افتتاح الشمعة القادمة تماماً (بالثانية 00)!**")
     
     bot_thread = threading.Thread(target=run_bot_loop)
     bot_thread.daemon = True
