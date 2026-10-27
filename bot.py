@@ -2,7 +2,7 @@ import time
 import requests
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import os
@@ -27,8 +27,8 @@ t.start()
 TELEGRAM_BOT_TOKEN = "7023463264:AAEL8N3HR5GxRhf0T9M_IW0VfY7_r797Ifs"
 TELEGRAM_CHANNEL_ID = "-1002330262707"
 
-# قائمة جميع أزواج العملات الرئيسية للسوق الحقيقي
-SYMBOLS = ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "EURGBP", "EURJPY"]
+# الأزواج الأربعة المطلوبة فقط
+SYMBOLS = ["EURUSD", "EURGBP", "EURJPY", "USDJPY"]
 
 # متغيرات الإحصائيات العامة والدورية
 stats_lock = threading.Lock()
@@ -39,9 +39,11 @@ global_stats = {
     "total": 0
 }
 
-# إحصائيات خاصة بكل زوج على حدة
+# إحصائيات خاصة بكل زوج
 symbol_stats = {sym: {"wins": 0, "losses": 0} for sym in SYMBOLS}
 
+# تتبع وقت آخر إشارة لكل زوج لعمل الاستراحة (دقيقتين)
+last_signal_time = {sym: 0 for sym in SYMBOLS}
 pending_signals = []
 
 def send_telegram_message(message):
@@ -80,16 +82,11 @@ def fetch_market_data(symbol):
         return None
 
 def process_pending_signals(symbol, df):
-    """
-    فحص الصفقات المعلقة بنظام المضاعفة الواحدة (Martingale x1)
-    بدون إرسال رسائل مزعجة فورية، فقط لتحديث العدادات بصمت.
-    """
     global pending_signals, global_stats, symbol_stats
     if df is None or len(df) < 3:
         return
     
     current_close = df['close'].iloc[-1]
-    prev_close = df['close'].iloc[-2]
     
     with stats_lock:
         remaining_signals = []
@@ -99,7 +96,6 @@ def process_pending_signals(symbol, df):
                 step = sig['step']
                 entry_price = sig['price']
                 
-                # التحقق هل ربحت الصفقة الحالية أم لا
                 is_win = False
                 if sig_type == 'CALL' and current_close > entry_price:
                     is_win = True
@@ -107,7 +103,6 @@ def process_pending_signals(symbol, df):
                     is_win = True
                 
                 if is_win:
-                    # صفقة رابحة
                     if step == 1:
                         global_stats["wins"] += 1
                     else:
@@ -115,9 +110,7 @@ def process_pending_signals(symbol, df):
                     global_stats["total"] += 1
                     symbol_stats[symbol]["wins"] += 1
                 else:
-                    # صفقة خاسرة
                     if step == 1:
-                        # لم تنجح الأساسية، نقوم بفتح مضاعفة أولى (Martingale x1) فوراً على الشمعة الحالية
                         next_open = df['open'].iloc[-1]
                         remaining_signals.append({
                             'symbol': symbol,
@@ -126,7 +119,6 @@ def process_pending_signals(symbol, df):
                             'step': 2
                         })
                     else:
-                        # فشلت حتى المضاعفة الأولى
                         global_stats["losses"] += 1
                         global_stats["total"] += 1
                         symbol_stats[symbol]["losses"] += 1
@@ -136,12 +128,17 @@ def process_pending_signals(symbol, df):
         pending_signals = remaining_signals
 
 def process_symbol(symbol):
-    global pending_signals
+    global pending_signals, last_signal_time
+    
+    # فحص فترة الاستراحة (دقيقتان = 120 ثانية)
+    current_time = time.time()
+    if current_time - last_signal_time[symbol] < 120:
+        return
+
     df = fetch_market_data(symbol)
     if df is None:
         return
     
-    # تحديث نتائج الصفقات السابقة بصمت
     process_pending_signals(symbol, df)
     
     df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
@@ -170,16 +167,21 @@ def process_symbol(symbol):
         signal_type = 'PUT'
         
     if signal_type:
+        # تحديث وقت آخر إشارة لهذا الزوج لبدء الاستراحة
+        last_signal_time[symbol] = current_time
+        
         emoji = '🟢 (صعود - CALL)' if signal_type == 'CALL' else '🔴 (هبوط - PUT)'
         
-        # جلب إحصائيات هذا الزوج وحده لإرسالها تحت الإشارة
+        # حساب توقيت البداية والنهاية للصفقة (مدة دقيقة واحدة)
+        now_dt = datetime.now()
+        start_time_str = now_dt.strftime('%H:%M:%S')
+        end_time_str = (now_dt + timedelta(minutes=1)).strftime('%H:%M:%S')
+        
         with stats_lock:
             s_wins = symbol_stats[symbol]["wins"]
             s_losses = symbol_stats[symbol]["losses"]
             s_total = s_wins + s_losses
-            s_wr = (s_wins / s_total * 100) if s_total > 0 else 0.0
             
-            # تسجيل الصفقة الجديدة
             pending_signals.append({
                 'symbol': symbol,
                 'type': signal_type,
@@ -188,19 +190,20 @@ def process_symbol(symbol):
             })
 
         msg = (
-            f"⚡ **LEGEND SIGNAL - تحليل فني مباشر** ⚡\n"
+            f"⚡ **LEGEND SIGNAL - تحليل فني دقيق** ⚡\n"
             f"━━━━━━━━━━━━━━━━━━━\n"
             f"💱 الزوج: `{symbol}` (سوق حقيقي)\n"
             f"📊 الإشارة: **{signal_type} {emoji}**\n"
-            f"⏰ الفريم: `1M` | الوقت: `{datetime.now().strftime('%H:%M:%S')}`\n"
-            f"💡 *الدخول مع افتتاح الشمعة القادمة (مع قبول مضاعفة واحدة عند اللزوم)*\n"
+            f"⏰ وقت البداية: `{start_time_str}`\n"
+            f"⏳ وقت النهاية: `{end_time_str}` (مدة دقيقة)\n"
+            f"💡 *الدخول مع افتتاح الشمعة القادمة (مضاعفة واحدة عند اللزوم)*\n"
             f"━━━━━━━━━━━━━━━━━━━\n"
             f"📈 **إحصائيات الزوج ({symbol}):**\n"
-            f"🎯 إجمالي صفقاته: `{s_total}` | ✅ رابحة: `{s_wins}` | ❌ خاسرة: `{s_losses}`"
+            f"🎯 صفقاته: `{s_total}` | ✅ رابحة: `{s_wins}` | ❌ خاسرة: `{s_losses}`"
         )
         
         send_telegram_message(msg)
-        print(f"تم إرسال إشارة لـ {symbol}")
+        print(f"تم إرسال إشارة لـ {symbol} مع تطبيق الاستراحة وتوقيت الصفقة")
 
 def run_bot_loop():
     while True:
@@ -213,7 +216,7 @@ def run_bot_loop():
         for t in threads:
             t.join()
             
-        time.sleep(30)
+        time.sleep(20)
 
 def send_periodic_results():
     global global_stats
@@ -235,19 +238,18 @@ def send_periodic_results():
             f"❌ صفقات خاسرة: `{losses}`\n"
             f"📈 نسبة الفوز الإجمالية: `{win_rate:.1f}%`\n"
             f"━━━━━━━━━━━━━━━━━━━\n"
-            f"💎 *LEGEND - MARTINGALE x1 BOT*"
+            f"💎 *LEGEND - 4 MAJOR PAIRS BOT*"
         )
         send_telegram_message(report)
 
 if __name__ == "__main__":
-    print("🚀 بدء تشغيل البوت بنظام إحصائيات الزوج وملخص الـ 5 دقائق...")
-    send_telegram_message("🟢 **تم تفعيل نظام إحصائيات الزوج تحت الإشارة + ملخص كل 5 دقائق + دعم مضاعفة واحدة (✅ / ✅1)!**")
+    print("🚀 بدء تشغيل البوت المحدث (4 أزواج + استراحة دقيقتين + أوقات الصفقات)...")
+    send_telegram_message("🟢 **تم تحديث البوت: تفعيل 4 أزواج رئيسية فقط، تحديد أوقات البداية والنهاية، واستراحة دقيقتين لكل زوج بعد الإشارة!**")
     
     bot_thread = threading.Thread(target=run_bot_loop)
     bot_thread.daemon = True
     bot_thread.start()
     
-    # إرسال التقرير الدوري كل 5 دقائق (300 ثانية)
     while True:
         time.sleep(300)
         send_periodic_results()
