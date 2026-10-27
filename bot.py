@@ -178,19 +178,16 @@ def process_symbol(symbol):
     is_strong_uptrend = (ema9 > ema20) and (ema20 > ema50) and (close_prev > bb_upper * 0.99) and (vol >= vol_avg)
     is_strong_downtrend = (ema9 < ema20) and (ema20 < ema50) and (close_prev < bb_lower * 1.01) and (vol >= vol_avg)
     
-    original_signal = None
+    signal_type = None
     if is_strong_uptrend and close_prev > open_prev:
-        original_signal = 'CALL'
+        signal_type = 'CALL'
     elif is_strong_downtrend and close_prev < open_prev:
-        original_signal = 'PUT'
+        signal_type = 'PUT'
         
-    if original_signal:
-        # [عكس الاتجاه بالكامل لتحويل الخسائر إلى أرباح خرافية بناءً على طلبك]
-        signal_type = 'PUT' if original_signal == 'CALL' else 'CALL'
-        
+    if signal_type:
         last_signal_time[symbol] = current_time
-        emoji = 'هبوط - PUT' if signal_type == 'PUT' else 'صعود - CALL'
-        emoji_icon = '🔴' if signal_type == 'PUT' else '🟢'
+        emoji = 'صعود - CALL' if signal_type == 'CALL' else 'هبوط - PUT'
+        emoji_icon = '🟢' if signal_type == 'CALL' else '🔴'
         
         # ضبط توقيت البداية والنهاية للشمعة القادمة بدقة على رأس الدقيقة (الثانية 00)
         now_dt = datetime.now()
@@ -199,13 +196,12 @@ def process_symbol(symbol):
         end_1m = (next_candle_dt + timedelta(minutes=1)).strftime('%H:%M:%S')
         end_5m = (next_candle_dt + timedelta(minutes=5)).strftime('%H:%M:%S')
         
-        # التنسيق المطلوب تماماً
         msg = (
             f"⚡ **LEGEND-X PRO ANALYZER** ⚡\n"
             f"━━━━━━━━━━━━━━━━━━━\n"
             f"💱 الزوج: `{symbol}` (سوق حقيقي)\n"
-            f"📊 الإشارة العكسية: `{signal_type}` {emoji_icon} `({emoji})`\n"
-            f"⏰ وقت الإرسال والدخول: `{time_str}`\n"
+            f"📊 الإشارة: `{signal_type}` {emoji_icon} `({emoji})`\n"
+            f"⏰ وقت الإرسال والدخول (الشمعة القادمة): `{time_str}`\n"
             f"⏳ نهاية صفقة الدقيقة: `{end_1m}`\n"
             f"⏳ نهاية صفقة الـ 5 دقائق: `{end_5m}`\n"
             f"💡 حاول اخذ الصفقة مارجنال + ادارة رأس المال (مضاعفة أولى عند اللزوم)"
@@ -219,7 +215,7 @@ def process_symbol(symbol):
                 'price': current_open,
                 'step': 1
             })
-        print(f"تم إرسال إشارة عكسية للشمعة القادمة لـ {symbol}")
+        print(f"تم إرسال إشارة مباشرة للشمعة القادمة لـ {symbol}")
 
 def run_bot_loop():
     while True:
@@ -246,7 +242,7 @@ def send_periodic_results():
         win_rate = (total_wins / total) * 100 if total > 0 else 0.0
         
         report = (
-            f"📊 **الملخص الدوري للأداء العكسي (كل 5 دقائق)** 📊\n"
+            f"📊 **الملخص الدوري للأداء (كل 5 دقائق)** 📊\n"
             f"━━━━━━━━━━━━━━━━━━━\n"
             f"🎯 إجمالي الصفقات المنتهية: `{total}`\n"
             f"✅ ربح بدون مضاعفة: `{wins}` ✅\n"
@@ -254,13 +250,13 @@ def send_periodic_results():
             f"❌ صفقات خاسرة: `{losses}`\n"
             f"📈 نسبة الفوز الإجمالية: `{win_rate:.1f}%`\n"
             f"━━━━━━━━━━━━━━━━━━━\n"
-            f"💎 *LEGEND-X PRO REVERSED BOT*"
+            f"💎 *LEGEND-X PRO BOT*"
         )
         send_telegram_message(report)
 
 if __name__ == "__main__":
-    print("🚀 بدء تشغيل البوت بنظام الشمعة القادمة + عكس الاتجاه + المضاعفة...")
-    send_telegram_message("🟢 **تم تفعيل النسخة الاحترافية: تحليل الشمعة القادمة + عكس الاتجاه بالكامل + مضاعفة واحدة (✅ / ✅1)!**")
+    print("🚀 بدء تشغيل البوت بالاتجاه الأصلي المباشر + الشمعة القادمة + المضاعفة...")
+    send_telegram_message("🟢 **تم تفعيل النسخة بالاتجاه الأصلي المباشر + الشمعة القادمة + مضاعفة واحدة (✅ / ✅1)!**")
     
     bot_thread = threading.Thread(target=run_bot_loop)
     bot_thread.daemon = True
