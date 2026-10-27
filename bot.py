@@ -173,7 +173,6 @@ def process_symbol(symbol):
     vol = df['volume'].iloc[i]
     vol_avg = df['vol_sma'].iloc[i]
     
-    # سعر افتتاح الشمعة القادمة للدخول الدقيق
     current_open = df['open'].iloc[-1]
     
     is_strong_uptrend = (ema9 > ema20) and (ema20 > ema50) and (close_prev > bb_upper * 0.99) and (vol >= vol_avg)
@@ -186,12 +185,12 @@ def process_symbol(symbol):
         original_signal = 'PUT'
         
     if original_signal:
-        # [عكس الاتجاه بالكامل بناءً على طلبك لتحويل الخسائر لأرباح خارقة]
+        # [عكس الاتجاه بالكامل لتحويل الخسائر إلى أرباح خرافية بناءً على طلبك]
         signal_type = 'PUT' if original_signal == 'CALL' else 'CALL'
         
         last_signal_time[symbol] = current_time
-        emoji = 'صعود - CALL' if signal_type == 'CALL' else 'هبوط - PUT'
-        emoji_icon = '🟢' if signal_type == 'CALL' else '🔴'
+        emoji = 'هبوط - PUT' if signal_type == 'PUT' else 'صعود - CALL'
+        emoji_icon = '🔴' if signal_type == 'PUT' else '🟢'
         
         # ضبط توقيت البداية والنهاية للشمعة القادمة بدقة على رأس الدقيقة (الثانية 00)
         now_dt = datetime.now()
@@ -200,12 +199,13 @@ def process_symbol(symbol):
         end_1m = (next_candle_dt + timedelta(minutes=1)).strftime('%H:%M:%S')
         end_5m = (next_candle_dt + timedelta(minutes=5)).strftime('%H:%M:%S')
         
+        # التنسيق المطلوب تماماً
         msg = (
-            f"⚡ **LEGEND-X PRO REVERSED ANALYZER** ⚡\n"
+            f"⚡ **LEGEND-X PRO ANALYZER** ⚡\n"
             f"━━━━━━━━━━━━━━━━━━━\n"
             f"💱 الزوج: `{symbol}` (سوق حقيقي)\n"
             f"📊 الإشارة العكسية: `{signal_type}` {emoji_icon} `({emoji})`\n"
-            f"⏰ وقت الإرسال والدخول (الشمعة القادمة): `{time_str}`\n"
+            f"⏰ وقت الإرسال والدخول: `{time_str}`\n"
             f"⏳ نهاية صفقة الدقيقة: `{end_1m}`\n"
             f"⏳ نهاية صفقة الـ 5 دقائق: `{end_5m}`\n"
             f"💡 حاول اخذ الصفقة مارجنال + ادارة رأس المال (مضاعفة أولى عند اللزوم)"
@@ -254,7 +254,7 @@ def send_periodic_results():
             f"❌ صفقات خاسرة: `{losses}`\n"
             f"📈 نسبة الفوز الإجمالية: `{win_rate:.1f}%`\n"
             f"━━━━━━━━━━━━━━━━━━━\n"
-            f"💎 *LEGEND-X PRO MARTINGALE BOT*"
+            f"💎 *LEGEND-X PRO REVERSED BOT*"
         )
         send_telegram_message(report)
 
