@@ -32,7 +32,7 @@ t.start()
 TELEGRAM_BOT_TOKEN = "7023463264:AAEL8N3HR5GxRhf0T9M_IW0VfY7_r797Ifs"
 TELEGRAM_CHANNEL_ID = "-1002330262707"
 
-# التركيز على زوج واحد فقط (يمكنك تغييره متى شئت مثل "EURGBP" أو "USDJPY")
+# التركيز على زوج واحد فقط
 TARGET_SYMBOL = "EURUSD"
 
 # إحصائيات الأداء العامة
@@ -145,8 +145,8 @@ def check_pending_signals(df, symbol):
 
 def run_bot_loop():
     global last_signal_time, pending_signals
-    print(f"🚀 Started aggressive single-pair bot for {TARGET_SYMBOL}...")
-    send_telegram_message(f"🟢 **تم تفعيل وضع الجلسات السريعة الجبار على زوج واحد (`{TARGET_SYMBOL}`) بزخم عنيف!**")
+    print(f"🚀 Started active single-pair bot for {TARGET_SYMBOL}...")
+    send_telegram_message(f"🟢 **تم تنشيط بوت الجلسات السريعة على زوج (`{TARGET_SYMBOL}`) بنجاح!**")
     
     while True:
         try:
@@ -154,35 +154,26 @@ def run_bot_loop():
             if df is not None:
                 check_pending_signals(df, TARGET_SYMBOL)
                 
-                # استراتيجية سريعة وعنيفة تعتمد على RSI والزخم (توليد صفقات مكثفة)
-                delta = df['close'].diff()
-                gain = (delta.where(delta > 0, 0)).rolling(window=7).mean()
-                loss = (-delta.where(delta < 0, 0)).rolling(window=7).mean()
-                rs = gain / loss
-                df['rsi'] = 100 - (100 / (1 + rs))
-                
-                df['bb_mid'] = df['close'].rolling(window=10).mean()
-                df['bb_std'] = df['close'].rolling(window=10).std()
-                df['bb_upper'] = df['bb_mid'] + (df['bb_std'] * 1.8)
-                df['bb_lower'] = df['bb_mid'] - (df['bb_std'] * 1.8)
+                # حساب مؤشرات سريعة وقوية (EMA + Momentum) لتوليد صفقات متتالية ونشطة
+                df['ema5'] = df['close'].ewm(span=5, adjust=False).mean()
+                df['ema10'] = df['close'].ewm(span=10, adjust=False).mean()
                 
                 i = len(df) - 2
-                if i >= 5:
+                if i >= 3:
                     current_time = time.time()
-                    # استراحة قصيرة جداً (60 ثانية فقط) لضمان ضخ صفقات مستمرة كل دقيقة
-                    if current_time - last_signal_time >= 60:
+                    # استراحة قصيرة جداً (45 ثانية فقط) لضمان ضخ إشارات متتالية
+                    if current_time - last_signal_time >= 45:
                         close_p = df['close'].iloc[i]
                         open_p = df['open'].iloc[i]
-                        rsi_val = df['rsi'].iloc[i]
-                        bb_up = df['bb_upper'].iloc[i]
-                        bb_low = df['bb_lower'].iloc[i]
+                        ema5 = df['ema5'].iloc[i]
+                        ema10 = df['ema10'].iloc[i]
                         current_open = df['open'].iloc[-1]
                         
                         signal_type = None
-                        # شروط عنيفة سريعة للاختراق
-                        if close_p > bb_up and rsi_val > 55 and close_p > open_p:
+                        # شروط سريعة وقوية تعتمد على تقاطع المتوسطات وزخم الشمعة
+                        if ema5 > ema10 and close_p > open_p:
                             signal_type = 'CALL'
-                        elif close_p < bb_low and rsi_val < 45 and close_p < open_p:
+                        elif ema5 < ema10 and close_p < open_p:
                             signal_type = 'PUT'
                             
                         if signal_type:
@@ -206,7 +197,7 @@ def run_bot_loop():
                                 f"⏰ الفريم: `1M` | وقت الدخول: `{time_str}`\n"
                                 f"⏳ نهاية صفقة الدقيقة: `{end_1m}`\n"
                                 f"⏳ نهاية صفقة الـ 5 دقائق: `{end_5m}`\n"
-                                f"🔥 *صفقة سريعة بنظام الزخم العنيف (مضاعفة أولى عند اللزوم)*"
+                                f"🔥 *صفقة سريعة بنظام الزخم النشط (مضاعفة أولى عند اللزوم)*"
                             )
                             
                             send_telegram_message(msg)
@@ -220,9 +211,9 @@ def run_bot_loop():
                                 })
             
         except Exception as e:
-            print(f"Error in aggressive loop: {e}")
+            print(f"Error in active loop: {e}")
         
-        time.sleep(15) # فحص متواصل وسريع جداً
+        time.sleep(10)
 
 def send_periodic_results():
     global global_stats
@@ -254,7 +245,7 @@ def send_periodic_results():
             print(f"Error in periodic results: {e}")
 
 if __name__ == "__main__":
-    print(f"🚀 بدء التشغيل بنظام الجلسات الصينية السريعة لزوج {TARGET_SYMBOL}...")
+    print(f"🚀 بدء التشغيل بنظام الجلسات المكثفة لزوج {TARGET_SYMBOL}...")
     
     bot_thread = threading.Thread(target=run_bot_loop)
     bot_thread.daemon = True
