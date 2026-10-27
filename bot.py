@@ -44,6 +44,9 @@ global_stats = {
     "total": 0
 }
 
+# إحصائيات مستقلة لكل زوج لتتبع أداء كل زوج على حدة
+symbol_stats = {sym: {"wins": 0, "losses": 0} for sym in SYMBOLS}
+
 last_signal_time = {sym: 0 for sym in SYMBOLS}
 pending_signals = []
 
@@ -83,7 +86,7 @@ def fetch_market_data(symbol):
         return None
 
 def check_pending_signals(symbol, df):
-    global pending_signals, global_stats
+    global pending_signals, global_stats, symbol_stats
     if df is None or len(df) < 3:
         return
     
@@ -97,4 +100,43 @@ def check_pending_signals(symbol, df):
                 target_ts = sig.get('target_ts', 0)
                 
                 df['ts'] = df['timestamp']
-                matched = df[df['ts'] >= target
+                matched = df[df['ts'] >= target_ts]
+                
+                if len(matched) > 0:
+                    current_close = matched['close'].iloc[0]
+                    current_open = matched['open'].iloc[0]
+                    
+                    is_win = False
+                    if sig_type == 'CALL' and current_close > entry_price:
+                        is_win = True
+                    elif sig_type == 'PUT' and current_close < entry_price:
+                        is_win = True
+                    
+                    if is_win:
+                        if step == 1:
+                            global_stats["wins"] += 1
+                            symbol_stats[symbol]["wins"] += 1
+                            res_msg = f"✅ **نتيجة صفقة 1M: رابحة (WIN)** 🎯\n💱 الزوج: `{symbol}` | الاتجاه: `{sig_type}`\n💰 الدخول: `{entry_price}` | الإغلاق: `{current_close}`\n✨ *ربح من الدخول الأساسي (بدون مضاعفة ✅)*"
+                        else:
+                            global_stats["wins_m1"] += 1
+                            symbol_stats[symbol]["wins"] += 1
+                            res_msg = f"✅1 **نتيجة صفقة 1M: رابحة بالمضاعفة (WIN M1)** 🎯\n💱 الزوج: `{symbol}` | الاتجاه: `{sig_type}`\n💰 الدخول: `{entry_price}` | الإغلاق: `{current_close}`\n✨ *ربح بمضاعفة واحدة (✅1)*"
+                        
+                        global_stats["total"] += 1
+                        send_telegram_message(res_msg)
+                    else:
+                        if step == 1:
+                            next_open = current_open
+                            remaining_signals.append({
+                                'symbol': symbol,
+                                'type': sig_type,
+                                'price': next_open,
+                                'step': 2,
+                                'target_ts': target_ts + 60
+                            })
+                            m_msg = f"⚠️ **تنبيه مضاعفة أولى (Martingale x1)** 🔄\n💱 الزوج: `{symbol}` | الاتجاه: `{sig_type}`\n💡 *جاري تفعيل المضاعفة لتعويض الصفقة السابقة...*"
+                            send_telegram_message(m_msg)
+                        else:
+                            global_stats["losses"] += 1
+                            symbol_stats[symbol]["losses"] += 1
+                            global
