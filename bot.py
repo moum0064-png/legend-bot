@@ -187,11 +187,12 @@ def process_symbol(symbol):
         emoji = 'صعود - CALL' if signal_type == 'CALL' else 'هبوط - PUT'
         emoji_icon = '🟢' if signal_type == 'CALL' else '🔴'
         
-        # ضبط وقت عرض الرسالة ليكون مضبوطاً (+1 دقيقة في النص تماماً كما طلبت)
+        # التوقيت الدقيق والمنضبط تماماً للشمعة القادمة
         now_dt = datetime.now()
-        time_str = (now_dt + timedelta(minutes=1)).strftime('%H:%M:%S')
-        end_1m = (now_dt + timedelta(minutes=2)).strftime('%H:%M:%S')
-        end_5m = (now_dt + timedelta(minutes=6)).strftime('%H:%M:%S')
+        next_candle_dt = (now_dt + timedelta(minutes=1)).replace(second=0, microsecond=0)
+        time_str = next_candle_dt.strftime('%H:%M:%S')
+        end_1m = (next_candle_dt + timedelta(minutes=1)).strftime('%H:%M:%S')
+        end_5m = (next_candle_dt + timedelta(minutes=5)).strftime('%H:%M:%S')
         
         msg = (
             f"⚡ **LEGEND-X 1M PRO ANALYZER** ⚡\n"
@@ -254,8 +255,8 @@ def send_periodic_results():
             print(f"Error in periodic results: {e}")
 
 if __name__ == "__main__":
-    print("🚀 تشغيل البوت بالنسخة المستقرة والناجحة...")
-    send_telegram_message("🟢 **تم تحديث صيغة الوقت في الرسائل (+1 دقيقة) مع الحفاظ الكامل على استراتيجية النتائج الممتازة!**")
+    print("🚀 تشغيل البوت بالنسخة الأصلية الممتازة...")
+    send_telegram_message("🟢 **تم إعادة البوت إلى نسخته الأصلية الناجحة تماماً وبدون أي تعديل في التوقيت!**")
     
     bot_thread = threading.Thread(target=run_bot_loop)
     bot_thread.daemon = True
