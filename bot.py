@@ -27,8 +27,8 @@ t.start()
 TELEGRAM_BOT_TOKEN = "7023463264:AAEL8N3HR5GxRhf0T9M_IW0VfY7_r797Ifs"
 TELEGRAM_CHANNEL_ID = "-1002330262707"
 
-# قائمة الأزواج (تضم أزواج الـ OTC والمنصة)
-SYMBOLS = ["EURUSD", "EURGBP", "EURJPY"]
+# قائمة جميع أزواج العملات الرئيسية للسوق الحقيقي
+SYMBOLS = ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "EURGBP", "EURJPY"]
 
 # متغيرات الإحصائيات لتتبع الربح (ITM) والخسارة (OTM)
 stats_lock = threading.Lock()
@@ -98,10 +98,10 @@ def check_pending_signals(symbol, df):
                 
                 if is_win:
                     current_hour_stats["wins"] += 1
-                    res_msg = f"✅ **تتيجة الصفقة: ITM (ربح ناجح 92%+)** 🎯\n💱 الزوج: `{symbol}` (OTC)\n📈 الاتجاه: `{sig_type}`\n💰 الدخول: `{entry_price}` | الإغلاق: `{last_close}`"
+                    res_msg = f"✅ **نتيجة الصفقة: ITM (ربح ناجح)** 🎯\n💱 الزوج: `{symbol}` (Market)\n📈 الاتجاه: `{sig_type}`\n💰 الدخول: `{entry_price}` | الإغلاق: `{last_close}`"
                 else:
                     current_hour_stats["losses"] += 1
-                    res_msg = f"❌ **نتيجة الصفقة: OTM (خسارة)** ⚠️\n💱 الزوج: `{symbol}` (OTC)\n📈 الاتجاه: `{sig_type}`\n💰 الدخول: `{entry_price}` | الإغلاق: `{last_close}`"
+                    res_msg = f"❌ **نتيجة الصفقة: OTM (خسارة)** ⚠️\n💱 الزوج: `{symbol}` (Market)\n📈 الاتجاه: `{sig_type}`\n💰 الدخول: `{entry_price}` | الإغلاق: `{last_close}`"
                 
                 current_hour_stats["total"] += 1
                 send_telegram_message(res_msg)
@@ -123,52 +123,49 @@ def run_bot_logic():
         # حساب المتوسطات المتحركة للاتجاه (EMA 20 و EMA 50)
         df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
         df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
-        
-        # حساب مؤشر الفوليوم البسيط (VSA Simulation) مقارنة بمتوسط الحجوم
         df['vol_sma'] = df['volume'].rolling(window=10).mean()
         
         i = len(df) - 2
         if i < 2:
             continue
             
-        close_price = df['close'].iloc[i]
-        open_price = df['open'].iloc[i]
+        close_prev = df['close'].iloc[i]
+        open_prev = df['open'].iloc[i]
         ema20 = df['ema20'].iloc[i]
         ema50 = df['ema50'].iloc[i]
         vol = df['volume'].iloc[i]
         vol_avg = df['vol_sma'].iloc[i]
         
-        # شروط التحليل الفني المقتبس من استراتيجيتك (ترند قوي + فوليوم مرتفع + إغلاق شمعة)
-        is_uptrend = ema20 > ema50 and close_price > ema20
-        is_downtrend = ema20 < ema50 and close_price < ema20
-        high_volume = vol >= vol_avg * 1.1 # فوليوم مرتفع مؤكد
+        # سعر افتتاح الشمعة الحالية (الشمعة القادمة لدخول الصفقة)
+        current_open = df['open'].iloc[-1]
         
-        # [العكس الذكي أو الاتجاه المباشر بناءً على رغبتك في تحقيق أعلى نسبة ربح]:
-        # بما أنك فضلت الصفقات العكسية التي تحول الخسارة لربح وتضمن نسبة +90%، سنجعل البوت يلتقط الفرصة بدقة:
-        signal_type = 'CALL' if (is_uptrend and high_volume and close_price > open_price) else ('PUT' if (is_downtrend and high_volume and close_price < open_price) else None)
+        # الشروط الفنية (ترند + فوليوم) مباشرة دون عكس
+        is_uptrend = ema20 > ema50 and close_prev > ema20
+        is_downtrend = ema20 < ema50 and close_prev < ema20
+        high_volume = vol >= vol_avg * 1.05
         
-        # إذا أردت تفعيل العكس بالكامل لضمان الأرباح الخارقة كما اتفقنا:
-        # signal_type = 'PUT' if signal_type == 'CALL' else ('CALL' if signal_type == 'PUT' else None)
-        
+        signal_type = None
+        if is_uptrend and high_volume and close_prev > open_prev:
+            signal_type = 'CALL'
+        elif is_downtrend and high_volume and close_prev < open_prev:
+            signal_type = 'PUT'
+            
         if signal_type:
             emoji = '🟢 (صعود - CALL)' if signal_type == 'CALL' else '🔴 (هبوط - PUT)'
             msg = (
-                f"⚡ **LEGEND V4.2 - تحليل فني احترافي** ⚡\n"
+                f"⚡ **LEGEND V4.2 - تحليل فني مباشر** ⚡\n"
                 f"━━━━━━━━━━━━━━━━━━━\n"
-                f"💱 الزوج: `{symbol}` (OTC)\n"
+                f"💱 الزوج: `{symbol}` (سوق حقيقي)\n"
                 f"📊 الإشارة: **{signal_type} {emoji}**\n"
-                f"📈 مؤشر الاتجاه: صعود/هبوط قوي (EMA 20/50)\n"
-                f"📊 قوة الفوليوم (VSA): مرتفع وجاهز ✅\n"
                 f"⏰ الفريم: `1M` | الوقت: `{datetime.now().strftime('%H:%M:%S')}`\n"
-                f"💡 *صفقة ناضجة الآن - مدة الدقيقة الواحدة*"
+                f"💡 *الدخول المباشر مع افتتاح الشمعة القادمة لمدة دقيقة*"
             )
             
             send_telegram_message(msg)
             with stats_lock:
-                pending_signals.append({'symbol': symbol, 'type': signal_type, 'price': close_price})
-            print(f"تم إرسال إشارة تحليل فني لـ {symbol}")
+                pending_signals.append({'symbol': symbol, 'type': signal_type, 'price': current_open})
+            print(f"تم إرسال إشارة تحليل فني مباشر لـ {symbol} بسعر {current_open}")
             
-        # إرسال إشارة واحدة في الدورة لضمان الاستقرار وعدم التداخل
         break
 
 def send_periodic_results():
@@ -181,27 +178,26 @@ def send_periodic_results():
         win_rate = (wins / total) * 100 if total > 0 else 0.0
         
         report = (
-            f"📊 **تقرير أداء التحليل الفني (ITM / OTM)** 📊\n"
+            f"📊 **تقرير أداء التحليل الفني المباشر (ITM / OTM)** 📊\n"
             f"━━━━━━━━━━━━━━━━━━━\n"
             f"🎯 إجمالي الصفقات: `{total}`\n"
             f"✅ صفقات ناجحة (ITM): `{wins}`\n"
             f"❌ صفقات خاسرة (OTM): `{losses}`\n"
             f"📈 نسبة الفوز المحققة: `{win_rate:.1f}%`\n"
             f"━━━━━━━━━━━━━━━━━━━\n"
-            f"💎 *LEGEND - TRADING V4.2*"
+            f"💎 *LEGEND - MARKET DIRECT V4.2*"
         )
         send_telegram_message(report)
 
 if __name__ == "__main__":
-    print("🚀 بدء تشغيل بوت التحليل الفني المتقدم...")
-    send_telegram_message("🟢 **تم تفعيل بوت التحليل الفني المدمج (EMA + VSA + S/R) بنجاح!**")
+    print("🚀 بدء تشغيل بوت التحليل الفني المباشر للسوق الحقيقي...")
+    send_telegram_message("🟢 **تم تفعيل بوت التحليل الفني المباشر (بدون عكس الاتجاه) لجميع الأزواج الحقيقية!**")
     
     last_result_time = time.time()
     
     while True:
         run_bot_logic()
         
-        # إرسال التقرير الدوري كل 10 دقائق
         if time.time() - last_result_time >= 600:
             send_periodic_results()
             last_result_time = time.time()
