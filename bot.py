@@ -139,4 +139,143 @@ def check_pending_signals(symbol, df):
                         else:
                             global_stats["losses"] += 1
                             symbol_stats[symbol]["losses"] += 1
-                            global
+                            global_stats["total"] += 1
+                            loss_msg = f"❌ **نتيجة صفقة 1M: خاسرة (LOSS)** ⚠️\n💱 الزوج: `{symbol}` | الاتجاه: `{sig_type}`\n💰 الدخول: `{entry_price}` | الإغلاق: `{current_close}`\n📉 *فشلت الصفقة مع المضاعفة*"
+                            send_telegram_message(loss_msg)
+                else:
+                    remaining_signals.append(sig)
+            else:
+                remaining_signals.append(sig)
+                
+        pending_signals = remaining_signals
+
+def process_symbol(symbol):
+    global pending_signals, last_signal_time, symbol_stats
+    
+    current_time = time.time()
+    # حماية عدم التكرار المتتالي (5 دقائق راحة لنفس الزوج)
+    if current_time - last_signal_time[symbol] < 300:
+        return
+
+    df = fetch_market_data(symbol)
+    if df is None:
+        return
+    
+    check_pending_signals(symbol, df)
+    
+    # مؤشرات الزخم والاتجاه السريعة
+    df['ema5'] = df['close'].ewm(span=5, adjust=False).mean()
+    df['ema10'] = df['close'].ewm(span=10, adjust=False).mean()
+    
+    i = len(df) - 2
+    if i < 3:
+        return
+        
+    close_p = df['close'].iloc[i]
+    open_p = df['open'].iloc[i]
+    ema5 = df['ema5'].iloc[i]
+    ema10 = df['ema10'].iloc[i]
+    
+    current_open = df['open'].iloc[-1]
+    current_ts = int(df['timestamp'].iloc[-1])
+    
+    signal_type = None
+    if ema5 > ema10 and close_p > open_p:
+        signal_type = 'CALL'
+    elif ema5 < ema10 and close_p < open_p:
+        signal_type = 'PUT'
+        
+    if signal_type:
+        last_signal_time[symbol] = current_time
+        emoji = 'صعود - CALL' if signal_type == 'CALL' else 'هبوط - PUT'
+        emoji_icon = '🟢' if signal_type == 'CALL' else '🔴'
+        
+        now_dt = datetime.now()
+        time_str = now_dt.strftime('%H:%M:%S')
+        end_1m = (now_dt + timedelta(minutes=1)).strftime('%H:%M:%S')
+        end_5m = (now_dt + timedelta(minutes=5)).strftime('%H:%M:%S')
+        
+        # جلب إحصائيات هذا الزوج المحدد لعرضها أسفل الرسالة
+        with stats_lock:
+            s_wins = symbol_stats[symbol]["wins"]
+            s_losses = symbol_stats[symbol]["losses"]
+            s_total = s_wins + s_losses
+            s_win_rate = (s_wins / s_total * 100) if s_total > 0 else 0.0
+        
+        msg = (
+            f"⚡ **LEGEND-X INSTANT SESSION PRO** ⚡\n"
+            f"━━━━━━━━━━━━━━━━━━━\n"
+            f"💱 الزوج: `{symbol}` (سوق حقيقي)\n"
+            f"📊 الإشارة: `{signal_type}` {emoji_icon} `({emoji})`\n"
+            f"⏰ الفريم: `1M` | وقت الدخول: `{time_str}`\n"
+            f"⏳ نهاية صفقة الدقيقة: `{end_1m}`\n"
+            f"⏳ نهاية صفقة الـ 5 دقائق: `{end_5m}`\n"
+            f"━━━━━━━━━━━━━━━━━━━\n"
+            f"📈 **إحصائيات هذا الزوج حتى الآن:**\n"
+            f"🎯 رابحة: `{s_wins}` ✅ | خاسرة: `{s_losses}` ❌ | الفوز: `{s_win_rate:.1f}%`"
+        )
+        
+        send_telegram_message(msg)
+        with stats_lock:
+            pending_signals.append({
+                'symbol': symbol,
+                'type': signal_type,
+                'price': current_open,
+                'step': 1,
+                'target_ts': current_ts
+            })
+
+def run_bot_loop():
+    print("🚀 Instant session loop started...")
+    while True:
+        try:
+            for symbol in SYMBOLS:
+                process_symbol(symbol)
+                time.sleep(2)
+        except Exception as e:
+            print(f"Error in main loop: {e}")
+        time.sleep(5)
+
+def send_periodic_results():
+    global global_stats
+    while True:
+        time.sleep(300)
+        try:
+            with stats_lock:
+                wins = global_stats["wins"]
+                wins_m1 = global_stats["wins_m1"]
+                losses = global_stats["losses"]
+                total = global_stats["total"]
+                
+                total_wins = wins + wins_m1
+                win_rate = (total_wins / total) * 100 if total > 0 else 0.0
+                
+                report = (
+                    f"📊 **الملخص الدوري الإجمالي (كل 5 دقائق)** 📊\n"
+                    f"━━━━━━━━━━━━━━━━━━━\n"
+                    f"🎯 إجمالي الصفقات: `{total}`\n"
+                    f"✅ ربح أساسي: `{wins}` ✅\n"
+                    f"✅ ربح مضاعفة: `{wins_m1}` ✅1\n"
+                    f"❌ صفقات خاسرة: `{losses}`\n"
+                    f"📈 نسبة الفوز الإجمالية: `{win_rate:.1f}%`\n"
+                    f"━━━━━━━━━━━━━━━━━━━\n"
+                    f"💎 *LEGEND-X INSTANT SESSIONS*"
+                )
+                send_telegram_message(report)
+        except Exception as e:
+            print(f"Error in periodic results: {e}")
+
+if __name__ == "__main__":
+    print("🚀 تشغيل البوت مع إحصائيات كل زوج تحت كل إشارة...")
+    send_telegram_message("🟢 **تم إصلاح خطأ الكود وتشغيل البوت بنجاح!**")
+    
+    bot_thread = threading.Thread(target=run_bot_loop)
+    bot_thread.daemon = True
+    bot_thread.start()
+    
+    report_thread = threading.Thread(target=send_periodic_results)
+    report_thread.daemon = True
+    report_thread.start()
+    
+    while True:
+        time.sleep(3600)
